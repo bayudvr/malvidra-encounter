@@ -1,9 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Pin the workspace root so a stray lockfile in a parent directory is ignored.
-  turbopack: {
-    root: process.cwd(),
+  webpack: (config) => {
+    // react-konva lists `canvas` as an optional dep for Node-side rendering.
+    // We only render Konva on the client (dynamic import, ssr:false), so stub it.
+    config.resolve.alias = { ...config.resolve.alias, canvas: false };
+    return config;
   },
 };
 
