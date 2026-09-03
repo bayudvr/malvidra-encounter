@@ -22,7 +22,7 @@ export function ModeToggle({
     try {
       if (scene.mode === "exploration") {
         const { error: seedError } = await room.supabase.rpc(
-          "seed_player_combatants",
+          "seed_scene_combatants",
           { p_scene: scene.id },
         );
         if (seedError) throw seedError;

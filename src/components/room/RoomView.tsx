@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { useRoomState } from "@/lib/room/useRoomState";
@@ -11,6 +12,7 @@ import { MemberPanel } from "@/components/room/MemberPanel";
 import { AssetPanel } from "@/components/room/AssetPanel";
 import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
+import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
 
 const SceneCanvas = dynamic(
@@ -39,15 +41,21 @@ export function RoomView({
   userId: string;
   role: Role;
 }) {
+  const router = useRouter();
   const room = useRoomState(roomId, userId, role);
   const isDM = role === "dm";
   const scene = room.activeScene;
   const inCombat = scene?.mode === "combat";
 
+  // The DM removed this player from the room.
+  useEffect(() => {
+    if (room.kicked) router.replace("/rooms");
+  }, [room.kicked, router]);
+
   const [drawerState, setDrawer] = useState<Drawer>(null);
-  // The initiative drawer only makes sense during combat.
+  // The initiative editor drawer is the DM's, and only during combat.
   const drawer =
-    drawerState === "initiative" && !inCombat ? null : drawerState;
+    drawerState === "initiative" && !(inCombat && isDM) ? null : drawerState;
 
   return (
     <div className="flex h-dvh flex-col">
@@ -84,7 +92,7 @@ export function RoomView({
               Player view
             </span>
           )}
-          {inCombat && (
+          {inCombat && isDM && (
             <button
               type="button"
               onClick={() =>
@@ -92,7 +100,7 @@ export function RoomView({
               }
               className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 lg:hidden"
             >
-              Initiative
+              Combatants
             </button>
           )}
         </div>
@@ -135,6 +143,7 @@ export function RoomView({
         </aside>
 
         <main className="relative min-w-0 flex-1 bg-neutral-950">
+          {inCombat && scene && <InitiativeBar room={room} scene={scene} />}
           {scene ? (
             <SceneCanvas room={room} scene={scene} />
           ) : (
@@ -146,8 +155,8 @@ export function RoomView({
           )}
         </main>
 
-        {/* Initiative: drawer on mobile, static column on desktop */}
-        {inCombat && scene && (
+        {/* DM's combatant editor: drawer on mobile, static column on desktop */}
+        {inCombat && isDM && scene && (
           <aside
             className={`absolute inset-y-0 right-0 z-40 w-[85vw] max-w-xs overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-3 transition-transform lg:static lg:z-auto lg:w-80 lg:max-w-none lg:translate-x-0 lg:bg-transparent lg:transition-none ${
               drawer === "initiative" ? "translate-x-0" : "translate-x-full"
@@ -158,7 +167,7 @@ export function RoomView({
                 type="button"
                 onClick={() => setDrawer(null)}
                 className="rounded-md p-1 text-neutral-500 hover:text-neutral-200"
-                aria-label="Close initiative"
+                aria-label="Close combatants"
               >
                 ✕
               </button>

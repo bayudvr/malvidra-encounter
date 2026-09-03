@@ -6,7 +6,7 @@ import { Button, Input, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { colorFromString } from "@/lib/utils";
 import type { RoomStore } from "@/lib/room/useRoomState";
-import type { CombatantUpdate, Scene } from "@/lib/room/types";
+import type { Combatant, CombatantUpdate, Scene } from "@/lib/room/types";
 
 export function InitiativeTracker({
   room,
@@ -23,6 +23,7 @@ export function InitiativeTracker({
   const [name, setName] = useState("");
   const [init, setInit] = useState("");
   const [hp, setHp] = useState("");
+  const [ac, setAc] = useState("");
 
   async function addCombatant(e: React.FormEvent) {
     e.preventDefault();
@@ -35,12 +36,15 @@ export function InitiativeTracker({
       initiative: init ? Number(init) : null,
       hp: hpNum,
       max_hp: hpNum,
+      ac: ac ? Number(ac) : null,
       sort_order: list.length,
     });
     if (error) return toast.error(error.message);
     setName("");
     setInit("");
     setHp("");
+    setAc("");
+    room.reloadScene();
   }
 
   async function patch(id: string, p: CombatantUpdate) {
@@ -57,6 +61,7 @@ export function InitiativeTracker({
       .delete()
       .eq("id", id);
     if (error) toast.error(error.message);
+    else room.reloadScene();
   }
 
   async function sortByInitiative() {
@@ -79,20 +84,6 @@ export function InitiativeTracker({
       .eq("id", scene.id);
   }
 
-  async function nextTurn() {
-    if (list.length === 0) return;
-    const idx = list.findIndex((c) => c.id === activeId);
-    const nextIdx = idx < 0 ? 0 : (idx + 1) % list.length;
-    const wrapped = idx >= 0 && nextIdx === 0;
-    await room.supabase
-      .from("scenes")
-      .update({
-        active_combatant_id: list[nextIdx].id,
-        round: wrapped ? scene.round + 1 : scene.round,
-      })
-      .eq("id", scene.id);
-  }
-
   async function resetCombat() {
     if (!confirm("Remove all combatants from this scene?")) return;
     await room.supabase.from("combatants").delete().eq("scene_id", scene.id);
@@ -100,6 +91,7 @@ export function InitiativeTracker({
       .from("scenes")
       .update({ active_combatant_id: null, round: 1 })
       .eq("id", scene.id);
+    room.reloadScene();
   }
 
   return (
@@ -107,104 +99,27 @@ export function InitiativeTracker({
       title={`Initiative · round ${scene.round}`}
       action={
         isDM ? (
-          <div className="flex gap-1">
-            <Button size="sm" variant="ghost" onClick={sortByInitiative}>
-              Sort
-            </Button>
-            <Button size="sm" onClick={nextTurn}>
-              Next ▸
-            </Button>
-          </div>
+          <Button size="sm" variant="ghost" onClick={sortByInitiative}>
+            Sort by init
+          </Button>
         ) : null
       }
     >
       <ul className="space-y-1">
-        {list.map((c) => {
-          const isActive = c.id === activeId;
-          return (
-            <li
-              key={c.id}
-              className={`rounded border px-2 py-1.5 text-sm ${
-                isActive
-                  ? "border-amber-500 bg-amber-500/10"
-                  : "border-neutral-800"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ background: colorFromString(c.name) }}
-                />
-                <span className="flex-1 truncate">
-                  {c.name}
-                  {c.is_player && (
-                    <span className="ml-1 text-[10px] text-sky-300">PC</span>
-                  )}
-                </span>
-
-                {isDM ? (
-                  <input
-                    type="number"
-                    value={c.initiative ?? ""}
-                    onChange={(e) =>
-                      patch(c.id, {
-                        initiative:
-                          e.target.value === "" ? null : Number(e.target.value),
-                      })
-                    }
-                    className="w-12 rounded bg-neutral-800 px-1 py-0.5 text-center text-xs"
-                    placeholder="–"
-                  />
-                ) : (
-                  <span className="w-8 text-right text-xs text-neutral-400">
-                    {c.initiative ?? "–"}
-                  </span>
-                )}
-
-                {isDM && (
-                  <button
-                    className="text-neutral-500 hover:text-red-400"
-                    onClick={() => remove(c.id)}
-                    aria-label="Remove combatant"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-
-              {(c.hp != null || isDM) && (
-                <div className="mt-1 flex items-center gap-1 pl-4 text-xs text-neutral-400">
-                  <span>HP</span>
-                  {isDM ? (
-                    <>
-                      <input
-                        type="number"
-                        value={c.hp ?? ""}
-                        onChange={(e) =>
-                          patch(c.id, {
-                            hp:
-                              e.target.value === ""
-                                ? null
-                                : Number(e.target.value),
-                          })
-                        }
-                        className="w-12 rounded bg-neutral-800 px-1 py-0.5 text-center"
-                      />
-                      <span>/ {c.max_hp ?? "?"}</span>
-                    </>
-                  ) : (
-                    <span>
-                      {c.hp ?? "?"} / {c.max_hp ?? "?"}
-                    </span>
-                  )}
-                </div>
-              )}
-            </li>
-          );
-        })}
+        {list.map((c) => (
+          <CombatantRow
+            key={c.id}
+            combatant={c}
+            active={c.id === activeId}
+            isDM={isDM}
+            onPatch={(p) => patch(c.id, p)}
+            onRemove={() => remove(c.id)}
+          />
+        ))}
         {list.length === 0 && (
           <li className="text-xs text-neutral-500">
-            No combatants yet. Players are added automatically when combat starts.
+            No combatants yet. Tokens on the map are added automatically when
+            combat starts.
           </li>
         )}
       </ul>
@@ -233,6 +148,12 @@ export function InitiativeTracker({
                 onChange={(e) => setHp(e.target.value)}
                 placeholder="HP"
               />
+              <Input
+                type="number"
+                value={ac}
+                onChange={(e) => setAc(e.target.value)}
+                placeholder="AC"
+              />
             </div>
             <Button type="submit" size="sm" className="w-full">
               Add combatant
@@ -249,5 +170,159 @@ export function InitiativeTracker({
         </>
       )}
     </Panel>
+  );
+}
+
+function CombatantRow({
+  combatant: c,
+  active,
+  isDM,
+  onPatch,
+  onRemove,
+}: {
+  combatant: Combatant;
+  active: boolean;
+  isDM: boolean;
+  onPatch: (p: CombatantUpdate) => void;
+  onRemove: () => void;
+}) {
+  // Players only see the numbers of player characters — a monster's HP/AC
+  // stays hidden from them.
+  const showStats = isDM || c.is_player;
+
+  return (
+    <li
+      className={`rounded border px-2 py-1.5 text-sm ${
+        active ? "border-amber-500 bg-amber-500/10" : "border-neutral-800"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="h-2 w-2 shrink-0 rounded-full"
+          style={{ background: colorFromString(c.name) }}
+        />
+        <span className="flex-1 truncate">
+          {c.name}
+          {c.is_player && (
+            <span className="ml-1 text-[10px] text-sky-300">PC</span>
+          )}
+        </span>
+
+        {isDM ? (
+          <input
+            type="number"
+            value={c.initiative ?? ""}
+            onChange={(e) =>
+              onPatch({
+                initiative:
+                  e.target.value === "" ? null : Number(e.target.value),
+              })
+            }
+            className="w-12 rounded bg-neutral-800 px-1 py-0.5 text-center text-xs"
+            placeholder="–"
+          />
+        ) : (
+          <span className="w-8 text-right text-xs text-neutral-400">
+            {c.initiative ?? "–"}
+          </span>
+        )}
+
+        {isDM && (
+          <button
+            className="text-neutral-500 hover:text-red-400"
+            onClick={onRemove}
+            aria-label="Remove combatant"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+
+      {showStats && (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-4 text-xs text-neutral-400">
+          <span className="flex items-center gap-1">
+            <span className="text-neutral-500">AC</span>
+            {isDM ? (
+              <NumberCell
+                value={c.ac}
+                onCommit={(v) => onPatch({ ac: v })}
+                width="w-9"
+              />
+            ) : (
+              <span className="text-neutral-300">{c.ac ?? "–"}</span>
+            )}
+          </span>
+
+          <span className="flex items-center gap-1">
+            <span className="text-neutral-500">HP</span>
+            {isDM ? (
+              <>
+                <NumberCell
+                  value={c.hp}
+                  onCommit={(v) => onPatch({ hp: v })}
+                  width="w-11"
+                />
+                <span>/</span>
+                <NumberCell
+                  value={c.max_hp}
+                  onCommit={(v) => onPatch({ max_hp: v })}
+                  width="w-11"
+                />
+              </>
+            ) : (
+              <span className="text-neutral-300">
+                {c.hp ?? "?"} / {c.max_hp ?? "?"}
+              </span>
+            )}
+          </span>
+
+          <span className="flex items-center gap-1">
+            <span className="text-neutral-500">THP</span>
+            {isDM ? (
+              <NumberCell
+                value={c.temp_hp}
+                onCommit={(v) => onPatch({ temp_hp: v })}
+                width="w-9"
+              />
+            ) : (
+              <span className="text-neutral-300">{c.temp_hp ?? "–"}</span>
+            )}
+          </span>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function NumberCell({
+  value,
+  onCommit,
+  width,
+}: {
+  value: number | null;
+  onCommit: (v: number | null) => void;
+  width: string;
+}) {
+  const [draft, setDraft] = useState(value?.toString() ?? "");
+
+  // Keep the field in sync when the value changes elsewhere (realtime).
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
+    setDraft(value?.toString() ?? "");
+  }
+
+  return (
+    <input
+      type="number"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const next = draft === "" ? null : Number(draft);
+        if (next !== value) onCommit(next);
+      }}
+      className={`${width} rounded bg-neutral-800 px-1 py-0.5 text-center text-neutral-100`}
+      placeholder="–"
+    />
   );
 }

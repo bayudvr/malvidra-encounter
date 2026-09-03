@@ -7,7 +7,7 @@ import type Konva from "konva";
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
-import type { Scene, TokenUpdate } from "@/lib/room/types";
+import type { Combatant, Scene, TokenUpdate } from "@/lib/room/types";
 import { TokenSprite } from "@/components/scene/TokenSprite";
 
 const MIN_SCALE = 0.15;
@@ -97,6 +97,13 @@ export function SceneCanvas({
 
   const selectedToken = room.tokens.find((t) => t.id === selectedId) ?? null;
 
+  const inCombat = scene.mode === "combat";
+  const combatantByToken = useMemo(() => {
+    const map = new Map<string, Combatant>();
+    for (const c of room.combatants) if (c.token_id) map.set(c.token_id, c);
+    return map;
+  }, [room.combatants]);
+
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
       <Stage
@@ -138,18 +145,26 @@ export function SceneCanvas({
         <Layer>
           {room.tokens
             .filter((t) => isDM || !t.is_hidden)
-            .map((t) => (
-              <TokenSprite
-                key={t.id}
-                token={t}
-                gridSize={scene.grid_size}
-                draggable={isDM}
-                owned={t.owner_user_id === room.userId}
-                selected={t.id === selectedId}
-                onSelect={() => isDM && setSelectedId(t.id)}
-                onDragEnd={(x, y) => moveToken(t.id, x, y)}
-              />
-            ))}
+            .map((t) => {
+              const owned = t.owner_user_id === room.userId;
+              const combatant = inCombat
+                ? (combatantByToken.get(t.id) ?? null)
+                : null;
+              return (
+                <TokenSprite
+                  key={t.id}
+                  token={t}
+                  gridSize={scene.grid_size}
+                  draggable={isDM || owned}
+                  owned={owned}
+                  selected={t.id === selectedId}
+                  combatant={combatant}
+                  revealStats={isDM || !!combatant?.is_player}
+                  onSelect={() => isDM && setSelectedId(t.id)}
+                  onDragEnd={(x, y) => moveToken(t.id, x, y)}
+                />
+              );
+            })}
           {/* ping marker at origin for orientation */}
           <Circle x={0} y={0} radius={3} fill="#f59e0b" listening={false} />
         </Layer>

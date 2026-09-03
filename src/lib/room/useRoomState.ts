@@ -37,6 +37,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
   const supabase = useMemo(() => createClient(), []);
   const [state, setState] = useState<State>(EMPTY);
   const [previewSceneId, setPreviewSceneId] = useState<string | null>(null);
+  const [kicked, setKicked] = useState(false);
 
   // The scene everyone sees is room.active_scene_id. The DM may preview another.
   const activeSceneId =
@@ -179,7 +180,19 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
           table: "room_members",
           filter: `room_id=eq.${roomId}`,
         },
-        () => loadRoomBits(),
+        async () => {
+          loadRoomBits();
+          // A player who was just kicked should be bounced out of the room.
+          if (role !== "dm") {
+            const { data } = await supabase
+              .from("room_members")
+              .select("id")
+              .eq("room_id", roomId)
+              .eq("user_id", userId)
+              .maybeSingle();
+            if (!data) setKicked(true);
+          }
+        },
       )
       .on(
         "postgres_changes",
@@ -261,7 +274,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roomId, supabase, loadRoomBits]);
+  }, [roomId, supabase, loadRoomBits, role, userId]);
 
   const activeScene =
     state.scenes.find((s) => s.id === activeSceneId) ?? null;
@@ -279,6 +292,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     supabase,
     userId,
     role,
+    kicked,
     activeScene,
     activeSceneId,
     previewSceneId,

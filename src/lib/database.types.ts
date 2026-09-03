@@ -165,6 +165,7 @@ export interface Database {
           sort_order: number;
           hp: number | null;
           max_hp: number | null;
+          temp_hp: number | null;
           ac: number | null;
           is_player: boolean;
           user_id: string | null;
@@ -180,6 +181,7 @@ export interface Database {
           sort_order?: number;
           hp?: number | null;
           max_hp?: number | null;
+          temp_hp?: number | null;
           ac?: number | null;
           is_player?: boolean;
           user_id?: string | null;
@@ -193,6 +195,7 @@ export interface Database {
           sort_order?: number;
           hp?: number | null;
           max_hp?: number | null;
+          temp_hp?: number | null;
           ac?: number | null;
           conditions?: string[];
           token_id?: string | null;
@@ -203,7 +206,7 @@ export interface Database {
     Views: Record<string, never>;
     Functions: {
       join_room: { Args: { p_code: string }; Returns: string };
-      seed_player_combatants: { Args: { p_scene: string }; Returns: undefined };
+      seed_scene_combatants: { Args: { p_scene: string }; Returns: undefined };
       is_room_member: { Args: { p_room: string }; Returns: boolean };
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
     };
