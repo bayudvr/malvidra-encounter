@@ -4,6 +4,7 @@ import { useMemo } from "react";
 
 import { useToast } from "@/components/toast";
 import { colorFromString, initials } from "@/lib/utils";
+import { conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Scene } from "@/lib/room/types";
 
@@ -89,6 +90,8 @@ export function InitiativeBar({
             c.max_hp && c.hp != null
               ? Math.max(0, Math.min(1, c.hp / c.max_hp))
               : null;
+          const downed =
+            !c.is_player && c.hp != null && c.hp <= 0;
 
           return (
             <li key={c.id}>
@@ -101,7 +104,9 @@ export function InitiativeBar({
                   active
                     ? "border-amber-400 bg-amber-400/15"
                     : "border-transparent hover:border-neutral-600"
-                } ${isDM ? "cursor-pointer" : "cursor-default"}`}
+                } ${isDM ? "cursor-pointer" : "cursor-default"} ${
+                  downed ? "opacity-50 grayscale" : ""
+                }`}
               >
                 <div
                   className="relative h-10 w-10 overflow-hidden rounded-full border border-neutral-600"
@@ -133,6 +138,19 @@ export function InitiativeBar({
                 <span className="w-full truncate text-center text-[10px] text-neutral-300">
                   {c.name}
                 </span>
+
+                {c.conditions.length > 0 && (
+                  <span className="flex flex-wrap justify-center gap-0.5">
+                    {c.conditions.map((cond, i) => (
+                      <span
+                        key={i}
+                        title={cond}
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ background: conditionColor(cond) }}
+                      />
+                    ))}
+                  </span>
+                )}
 
                 {showStats && ratio != null && (
                   <span className="block h-1 w-full overflow-hidden rounded-full bg-neutral-700">

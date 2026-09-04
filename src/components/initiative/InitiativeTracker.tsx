@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button, Input, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { colorFromString } from "@/lib/utils";
+import { CONDITION_PRESETS, conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Combatant, CombatantUpdate, Scene } from "@/lib/room/types";
 
@@ -288,6 +289,63 @@ function CombatantRow({
               <span className="text-neutral-300">{c.temp_hp ?? "–"}</span>
             )}
           </span>
+        </div>
+      )}
+
+      {(isDM || c.conditions.length > 0) && (
+        <div className="mt-1 flex flex-wrap items-center gap-1 pl-4">
+          {c.conditions.map((cond, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+              style={{
+                background: `${conditionColor(cond)}26`,
+                color: conditionColor(cond),
+              }}
+            >
+              {cond}
+              {isDM && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${cond}`}
+                  onClick={() =>
+                    onPatch({
+                      conditions: c.conditions.filter((_, j) => j !== i),
+                    })
+                  }
+                  className="opacity-70 hover:opacity-100"
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+
+          {isDM && (
+            <select
+              value=""
+              onChange={(e) => {
+                const v = e.target.value;
+                e.target.value = "";
+                if (!v) return;
+                if (v === "__custom__") {
+                  const name = window.prompt("Condition name")?.trim();
+                  if (name) onPatch({ conditions: [...c.conditions, name] });
+                } else {
+                  onPatch({ conditions: [...c.conditions, v] });
+                }
+              }}
+              className="rounded bg-neutral-800 px-1 py-0.5 text-[10px] text-neutral-300"
+            >
+              <option value="">+ condition</option>
+              {CONDITION_PRESETS.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+              <option value="__custom__">Custom…</option>
+            </select>
+          )}
         </div>
       )}
     </li>
