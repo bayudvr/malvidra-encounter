@@ -6,10 +6,13 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { useRoomState } from "@/lib/room/useRoomState";
+import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Role } from "@/lib/room/types";
+import { useToast } from "@/components/toast";
 import { SceneList } from "@/components/room/SceneList";
 import { MemberPanel } from "@/components/room/MemberPanel";
 import { AssetPanel } from "@/components/room/AssetPanel";
+import { RoomWebhookPanel } from "@/components/room/RoomWebhookPanel";
 import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
@@ -77,9 +80,11 @@ export function RoomView({
           >
             ←
           </Link>
-          <h1 className="truncate text-sm font-semibold text-amber-400">
-            {roomName}
-          </h1>
+          <EditableRoomName
+            room={room}
+            isDM={isDM}
+            name={room.room?.name ?? roomName}
+          />
           {scene && (
             <span className="hidden truncate text-xs text-neutral-500 sm:inline">
               / {scene.name} · {scene.mode}
@@ -141,7 +146,8 @@ export function RoomView({
           <SceneList room={room} />
           {isDM && scene && <SceneSettings room={room} scene={scene} />}
           {isDM && <AssetPanel room={room} />}
-          <MemberPanel room={room} roomName={roomName} />
+          {isDM && <RoomWebhookPanel room={room} />}
+          <MemberPanel room={room} roomName={room.room?.name ?? roomName} />
         </aside>
 
         <main className="relative min-w-0 flex-1 bg-neutral-950">
@@ -179,6 +185,76 @@ export function RoomView({
         )}
       </div>
     </div>
+  );
+}
+
+function EditableRoomName({
+  room,
+  isDM,
+  name,
+}: {
+  room: RoomStore;
+  isDM: boolean;
+  name: string;
+}) {
+  const toast = useToast();
+  const [value, setValue] = useState(name);
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => setValue(name), [name]);
+
+  async function commit() {
+    setEditing(false);
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === name) {
+      setValue(name);
+      return;
+    }
+    const { error } = await room.supabase
+      .from("rooms")
+      .update({ name: trimmed })
+      .eq("id", room.room!.id);
+    if (error) {
+      toast.error(error.message);
+      setValue(name);
+    }
+  }
+
+  if (!isDM) {
+    return (
+      <h1 className="truncate text-sm font-semibold text-amber-400">
+        {name}
+      </h1>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <h1
+        onClick={() => setEditing(true)}
+        title="Rename room"
+        className="cursor-text truncate text-sm font-semibold text-amber-400 hover:underline"
+      >
+        {name}
+      </h1>
+    );
+  }
+
+  return (
+    <input
+      autoFocus
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          setValue(name);
+          setEditing(false);
+        }
+      }}
+      className="min-w-0 max-w-[12rem] rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-sm font-semibold text-amber-400 focus:outline-none"
+    />
   );
 }
 

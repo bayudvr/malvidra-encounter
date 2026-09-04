@@ -25,6 +25,7 @@ export interface Database {
           dm_id: string;
           invite_code: string;
           active_scene_id: string | null;
+          archived_at: string | null;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -32,11 +33,13 @@ export interface Database {
           dm_id: string;
           invite_code?: string;
           active_scene_id?: string | null;
+          archived_at?: string | null;
           created_at?: string;
         };
         Update: {
           name?: string;
           active_scene_id?: string | null;
+          archived_at?: string | null;
         };
         Relationships: [];
       };
@@ -85,6 +88,9 @@ export interface Database {
           grid_size: number;
           grid_enabled: boolean;
           snap_to_grid: boolean;
+          grid_color: string;
+          grid_opacity: number;
+          grid_thickness: number;
           feet_per_square: number;
           position: number;
           round: number;
@@ -99,6 +105,9 @@ export interface Database {
           grid_size?: number;
           grid_enabled?: boolean;
           snap_to_grid?: boolean;
+          grid_color?: string;
+          grid_opacity?: number;
+          grid_thickness?: number;
           feet_per_square?: number;
           position?: number;
           round?: number;
@@ -112,6 +121,9 @@ export interface Database {
           grid_size?: number;
           grid_enabled?: boolean;
           snap_to_grid?: boolean;
+          grid_color?: string;
+          grid_opacity?: number;
+          grid_thickness?: number;
           feet_per_square?: number;
           position?: number;
           round?: number;
@@ -184,6 +196,32 @@ export interface Database {
         Update: { actor_name?: string; notation?: string; total?: number };
         Relationships: [];
       };
+      room_webhooks: {
+        Row: {
+          id: string;
+          room_id: string;
+          discord_webhook_url: string;
+          notify_combat: boolean;
+          notify_dice: boolean;
+          notify_scene: boolean;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          room_id: string;
+          discord_webhook_url: string;
+          notify_combat?: boolean;
+          notify_dice?: boolean;
+          notify_scene?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          discord_webhook_url?: string;
+          notify_combat?: boolean;
+          notify_dice?: boolean;
+          notify_scene?: boolean;
+        };
+        Relationships: [];
+      };
       combatants: {
         Row: {
           id: string;
@@ -238,6 +276,7 @@ export interface Database {
       seed_scene_combatants: { Args: { p_scene: string }; Returns: undefined };
       is_room_member: { Args: { p_room: string }; Returns: boolean };
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
+      send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
