@@ -4,7 +4,7 @@ import { Arc, Circle, Group, Rect, Text } from "react-konva";
 import type Konva from "konva";
 
 import { useImage } from "@/lib/useImage";
-import { colorFromString } from "@/lib/utils";
+import { colorFromString, tokenInitials } from "@/lib/utils";
 import { conditionCode, conditionColor } from "@/lib/conditions";
 import type { Combatant, Token } from "@/lib/room/types";
 
@@ -105,6 +105,22 @@ export function TokenSprite({
         stroke="#0a0a0a"
         strokeWidth={2}
       />
+
+      {!image && (
+        <Text
+          text={tokenInitials(token.label)}
+          fontSize={radius * (tokenInitials(token.label).length > 2 ? 0.65 : 0.9)}
+          fontStyle="bold"
+          fill="#0a0a0a"
+          align="center"
+          verticalAlign="middle"
+          width={radius * 2}
+          height={radius * 2}
+          offsetX={radius}
+          offsetY={radius}
+          listening={false}
+        />
+      )}
 
       {downed && (
         <>

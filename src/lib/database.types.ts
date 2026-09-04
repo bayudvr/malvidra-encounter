@@ -66,16 +66,16 @@ export interface Database {
           id: string;
           room_id: string;
           name: string;
-          image_url: string;
+          image_url: string | null;
         } & Timestamps;
         Insert: {
           id?: string;
           room_id: string;
           name: string;
-          image_url: string;
+          image_url?: string | null;
           created_at?: string;
         };
-        Update: { name?: string; image_url?: string };
+        Update: { name?: string; image_url?: string | null };
         Relationships: [];
       };
       scenes: {

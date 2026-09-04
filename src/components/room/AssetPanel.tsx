@@ -6,6 +6,7 @@ import { Button, Input, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Asset } from "@/lib/room/types";
+import { colorFromString, tokenInitials } from "@/lib/utils";
 
 export function AssetPanel({ room }: { room: RoomStore }) {
   const toast = useToast();
@@ -15,11 +16,11 @@ export function AssetPanel({ room }: { room: RoomStore }) {
 
   async function addAsset(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim() || !url.trim()) return;
+    if (!name.trim()) return;
     const { error } = await room.supabase.from("assets").insert({
       room_id: room.room!.id,
       name: name.trim(),
-      image_url: url.trim(),
+      image_url: url.trim() || null,
     });
     if (error) return toast.error(error.message);
     setName("");
@@ -44,7 +45,11 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     else room.reload();
   }
 
-  async function dropToScene(assetId: string, label: string, imageUrl: string) {
+  async function dropToScene(
+    assetId: string,
+    label: string,
+    imageUrl: string | null,
+  ) {
     if (!scene) return toast.error("Open a scene first");
     const g = scene.grid_size;
     // Center of cell (2,2) so a freshly-dropped token already sits neatly
@@ -94,7 +99,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
         <Input
           value={url}
           onChange={(e) => setUrl(e.target.value)}
-          placeholder="Image URL"
+          placeholder="Image URL (optional)"
         />
         <Button type="submit" size="sm" className="w-full">
           Add to library
@@ -121,12 +126,21 @@ function AssetRow({
 
   return (
     <li className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-neutral-800/50">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={asset.image_url}
-        alt=""
-        className="h-7 w-7 shrink-0 rounded-full object-cover"
-      />
+      {asset.image_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={asset.image_url}
+          alt=""
+          className="h-7 w-7 shrink-0 rounded-full object-cover"
+        />
+      ) : (
+        <span
+          style={{ background: colorFromString(asset.name) }}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-neutral-950"
+        >
+          {tokenInitials(asset.name)}
+        </span>
+      )}
       <input
         value={name}
         onChange={(e) => setName(e.target.value)}
