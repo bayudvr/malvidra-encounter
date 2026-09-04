@@ -4,6 +4,9 @@
 export type SceneMode = "exploration" | "combat";
 export type MemberRole = "dm" | "player";
 
+/** One die group in a roll, e.g. { sides: 6, values: [3, 5] }. */
+export type DiceDetail = { sides: number; values: number[] };
+
 type Timestamps = { created_at: string };
 
 export interface Database {
@@ -156,6 +159,29 @@ export interface Database {
           owner_user_id?: string | null;
           is_hidden?: boolean;
         };
+        Relationships: [];
+      };
+      dice_rolls: {
+        Row: {
+          id: string;
+          room_id: string;
+          user_id: string | null;
+          actor_name: string;
+          notation: string;
+          detail: DiceDetail[];
+          total: number;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          room_id: string;
+          user_id?: string | null;
+          actor_name: string;
+          notation: string;
+          detail?: DiceDetail[];
+          total: number;
+          created_at?: string;
+        };
+        Update: { actor_name?: string; notation?: string; total?: number };
         Relationships: [];
       };
       combatants: {

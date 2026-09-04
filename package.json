@@ -10,6 +10,7 @@
     "db:push": "node scripts/db-push.mjs"
   },
   "dependencies": {
+    "@3d-dice/dice-box": "^1.1.4",
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.114.0",
     "konva": "^10.3.2",

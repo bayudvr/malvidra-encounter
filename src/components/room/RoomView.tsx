@@ -14,6 +14,7 @@ import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
+import { DiceTray } from "@/components/dice/DiceTray";
 
 const SceneCanvas = dynamic(
   () => import("@/components/scene/SceneCanvas").then((m) => m.SceneCanvas),
@@ -59,6 +60,7 @@ export function RoomView({
 
   return (
     <div className="flex h-dvh flex-col">
+      <DiceTray room={room} />
       <header className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2 sm:px-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
