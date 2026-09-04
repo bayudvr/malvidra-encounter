@@ -19,13 +19,22 @@ export function SceneSettings({
   const [mapUrl, setMapUrl] = useState(scene.map_url ?? "");
   const [gridSize, setGridSize] = useState(String(scene.grid_size));
   const [feet, setFeet] = useState(String(scene.feet_per_square));
+  const [spotlightNote, setSpotlightNote] = useState(scene.spotlight_note ?? "");
 
   useEffect(() => {
     setName(scene.name);
     setMapUrl(scene.map_url ?? "");
     setGridSize(String(scene.grid_size));
     setFeet(String(scene.feet_per_square));
-  }, [scene.id, scene.name, scene.map_url, scene.grid_size, scene.feet_per_square]);
+    setSpotlightNote(scene.spotlight_note ?? "");
+  }, [
+    scene.id,
+    scene.name,
+    scene.map_url,
+    scene.grid_size,
+    scene.feet_per_square,
+    scene.spotlight_note,
+  ]);
 
   async function update(patch: SceneUpdate) {
     const { error } = await room.supabase
@@ -179,6 +188,56 @@ export function SceneSettings({
             }
             className="w-full"
           />
+        </div>
+
+        <div className="space-y-2 border-t border-neutral-800 pt-3">
+          <Label htmlFor="spotlightUser">
+            Spotlight (waiting on) — shown to everyone, outside combat too
+          </Label>
+          <select
+            id="spotlightUser"
+            value={scene.spotlight_user_id ?? ""}
+            onChange={(e) =>
+              update({ spotlight_user_id: e.target.value || null })
+            }
+            className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-sm"
+          >
+            <option value="">No one picked</option>
+            {room.members
+              .filter((m) => m.role === "player")
+              .map((p) => (
+                <option key={p.user_id} value={p.user_id}>
+                  {p.display_name}
+                </option>
+              ))}
+          </select>
+          <div className="flex gap-1">
+            <Input
+              value={spotlightNote}
+              onChange={(e) => setSpotlightNote(e.target.value)}
+              placeholder='Optional note (e.g. "which door?")'
+            />
+            <Button
+              size="sm"
+              onClick={() =>
+                update({ spotlight_note: spotlightNote.trim() || null })
+              }
+            >
+              Set
+            </Button>
+          </div>
+          {(scene.spotlight_user_id || scene.spotlight_note) && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setSpotlightNote("");
+                update({ spotlight_user_id: null, spotlight_note: null });
+              }}
+            >
+              Clear spotlight
+            </Button>
+          )}
         </div>
       </div>
     </Panel>

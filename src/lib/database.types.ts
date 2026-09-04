@@ -95,6 +95,8 @@ export interface Database {
           position: number;
           round: number;
           active_combatant_id: string | null;
+          spotlight_user_id: string | null;
+          spotlight_note: string | null;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -112,6 +114,8 @@ export interface Database {
           position?: number;
           round?: number;
           active_combatant_id?: string | null;
+          spotlight_user_id?: string | null;
+          spotlight_note?: string | null;
           created_at?: string;
         };
         Update: {
@@ -124,6 +128,8 @@ export interface Database {
           grid_color?: string;
           grid_opacity?: number;
           grid_thickness?: number;
+          spotlight_user_id?: string | null;
+          spotlight_note?: string | null;
           feet_per_square?: number;
           position?: number;
           round?: number;

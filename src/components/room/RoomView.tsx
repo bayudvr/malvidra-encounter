@@ -113,6 +113,24 @@ export function RoomView({
         </div>
       </header>
 
+      {scene && (scene.spotlight_user_id || scene.spotlight_note) && (
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs text-amber-200 sm:px-4">
+          👀 Waiting on{" "}
+          {scene.spotlight_user_id && (
+            <strong>
+              {room.members.find((m) => m.user_id === scene.spotlight_user_id)
+                ?.display_name ?? "someone"}
+            </strong>
+          )}
+          {scene.spotlight_note && (
+            <>
+              {scene.spotlight_user_id ? ": " : " "}
+              {scene.spotlight_note}
+            </>
+          )}
+        </div>
+      )}
+
       <div className="relative flex min-h-0 flex-1">
         {/* Backdrop for mobile drawers */}
         {drawer && (
