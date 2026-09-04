@@ -44,6 +44,8 @@ export function SceneCanvas({
   const [measuring, setMeasuring] = useState(false);
   const [measureMenu, setMeasureMenu] = useState(false);
   const measureDrawing = useRef(false);
+  const lastPinch = useRef<{ dist: number; cx: number; cy: number } | null>(null);
+  const didPinch = useRef(false);
 
   const [mapImage] = useImage(scene.map_url);
 
@@ -120,7 +122,48 @@ export function SceneCanvas({
     setRuler(null);
   }
 
+  // Pinch-to-zoom (two-finger) on touch devices.
+  function pinchMove(e: Konva.KonvaEventObject<TouchEvent>) {
+    const t1 = e.evt.touches[0];
+    const t2 = e.evt.touches[1];
+    if (!t1 || !t2) return;
+    e.evt.preventDefault();
+    const stage = e.target.getStage();
+    if (!stage) return;
+    if (stage.isDragging()) stage.stopDrag();
+
+    const rect = stage.container().getBoundingClientRect();
+    const x1 = t1.clientX - rect.left;
+    const y1 = t1.clientY - rect.top;
+    const x2 = t2.clientX - rect.left;
+    const y2 = t2.clientY - rect.top;
+    const dist = Math.hypot(x2 - x1, y2 - y1);
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+
+    const prev = lastPinch.current;
+    lastPinch.current = { dist, cx, cy };
+    if (!prev) return;
+    didPinch.current = true;
+
+    setView((v) => {
+      let scale = (v.scale * dist) / prev.dist;
+      scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+      const worldX = (cx - v.x) / v.scale;
+      const worldY = (cy - v.y) / v.scale;
+      return {
+        scale,
+        x: cx - worldX * scale + (cx - prev.cx),
+        y: cy - worldY * scale + (cy - prev.cy),
+      };
+    });
+  }
+
   function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if ("touches" in e.evt && e.evt.touches.length > 1) {
+      lastPinch.current = null;
+      return;
+    }
     if (measuring) {
       e.evt.preventDefault();
       const p = worldPointer(e);
@@ -133,6 +176,10 @@ export function SceneCanvas({
   }
 
   function stagePointerMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if ("touches" in e.evt && e.evt.touches.length > 1) {
+      pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
+      return;
+    }
     if (!measuring || !measureDrawing.current) return;
     const p = worldPointer(e);
     if (p) setRuler((r) => (r ? { ...r, x: p.x, y: p.y } : r));
@@ -141,7 +188,21 @@ export function SceneCanvas({
   function stagePointerUp() {
     // The ruler only lives during the interaction — clear it on release.
     measureDrawing.current = false;
+    lastPinch.current = null;
     setRuler(null);
+  }
+
+  // Zoom around the centre of the viewport (used by the on-screen buttons).
+  function zoomBy(factor: number) {
+    setView((v) => {
+      let scale = v.scale * factor;
+      scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
+      const cx = size.w / 2;
+      const cy = size.h / 2;
+      const worldX = (cx - v.x) / v.scale;
+      const worldY = (cy - v.y) / v.scale;
+      return { scale, x: cx - worldX * scale, y: cy - worldY * scale };
+    });
   }
 
   async function moveToken(id: string, rawX: number, rawY: number) {
@@ -181,6 +242,11 @@ export function SceneCanvas({
         scaleY={view.scale}
         onWheel={handleWheel}
         onDragEnd={(e) => {
+          // A pinch stops the drag mid-flight — don't clobber the pinched view.
+          if (didPinch.current) {
+            didPinch.current = false;
+            return;
+          }
           // Only the stage itself, not a token bubbling up
           if (e.target === e.target.getStage()) {
             setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }));
@@ -346,9 +412,27 @@ export function SceneCanvas({
           </button>
         )}
 
-        <span className="pointer-events-none rounded bg-neutral-900/80 px-2 py-1 text-[10px] text-neutral-400">
-          {Math.round(view.scale * 100)}%
-        </span>
+        <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200">
+          <button
+            type="button"
+            aria-label="Zoom out"
+            onClick={() => zoomBy(1 / 1.25)}
+            className="px-2 py-1 text-sm hover:bg-neutral-800"
+          >
+            −
+          </button>
+          <span className="min-w-[3rem] px-1 text-center text-[10px] text-neutral-400">
+            {Math.round(view.scale * 100)}%
+          </span>
+          <button
+            type="button"
+            aria-label="Zoom in"
+            onClick={() => zoomBy(1.25)}
+            className="px-2 py-1 text-sm hover:bg-neutral-800"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {isDM && selectedToken && (
