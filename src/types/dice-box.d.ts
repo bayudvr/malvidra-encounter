@@ -18,13 +18,21 @@ declare module "@3d-dice/dice-box" {
     rollId?: number;
   }
 
+  export interface DiceGroupInput {
+    qty: number;
+    sides: number | string;
+    mods?: unknown[];
+  }
+
   export default class DiceBox {
     constructor(config: DiceBoxConfig);
     init(): Promise<unknown>;
-    roll(notation: string | string[]): Promise<DiceResult[]>;
+    roll(
+      notation: string | string[] | DiceGroupInput[],
+    ): Promise<DiceResult[]>;
     add(notation: string | string[] | object): Promise<DiceResult[]>;
     clear(): void;
-    hide(): void;
+    hide(hideClass?: string): void;
     show(): void;
     onRollComplete: (results: DiceResult[]) => void;
   }

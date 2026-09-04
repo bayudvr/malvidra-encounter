@@ -20,3 +20,22 @@ body {
 * {
   min-width: 0;
 }
+
+/* dice-box appends a bare <canvas> with no sizing of its own — force it to
+   fill the fixed #mv-dice-overlay container instead of the browser's
+   default 300x150 replaced-element size. */
+#mv-dice-overlay canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transition: opacity 0.6s;
+}
+
+/* Toggled by DiceBox.hide("dice-box-canvas--hide") a few seconds after a
+   roll settles, so the 3D dice fade out instead of sitting on screen
+   blocking the map underneath. */
+#mv-dice-overlay canvas.dice-box-canvas--hide {
+  opacity: 0;
+}
