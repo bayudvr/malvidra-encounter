@@ -210,8 +210,13 @@ export function SceneCanvas({
     let y = rawY;
     if (scene.snap_to_grid) {
       const g = scene.grid_size;
-      x = Math.round(rawX / g) * g;
-      y = Math.round(rawY / g) * g;
+      const size = room.tokens.find((t) => t.id === id)?.size ?? 1;
+      const half = (size * g) / 2;
+      // Snap the token's footprint (not its center point) to the grid, so
+      // it sits centered inside its cell(s) with grid lines forming a clean
+      // border around it, instead of a line cutting through its middle.
+      x = Math.round((rawX - half) / g) * g + half;
+      y = Math.round((rawY - half) / g) * g + half;
     }
     room.patchTokenLocal(id, { x, y });
     const { error } = await room.supabase
@@ -273,7 +278,13 @@ export function SceneCanvas({
             />
           )}
           {gridLines.map((pts, i) => (
-            <Line key={i} points={pts} stroke="#ffffff18" strokeWidth={1} />
+            <Line
+              key={i}
+              points={pts}
+              stroke={scene.grid_color}
+              strokeWidth={scene.grid_thickness}
+              opacity={scene.grid_opacity}
+            />
           ))}
         </Layer>
 
