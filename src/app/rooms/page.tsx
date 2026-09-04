@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
-import { Badge, Panel } from "@/components/ui";
+import { Panel } from "@/components/ui";
 import { RoomsActions } from "./RoomsActions";
+import { RoomRow } from "./RoomRow";
 import { SignOutButton } from "./SignOutButton";
 
 export default async function RoomsPage() {
@@ -49,6 +49,9 @@ export default async function RoomsPage() {
     (memberships ?? []).map((m) => [m.room_id, m.role]),
   );
 
+  const activeRooms = (rooms ?? []).filter((r) => !r.archived_at);
+  const archivedRooms = (rooms ?? []).filter((r) => r.archived_at);
+
   return (
     <main className="mx-auto w-full max-w-3xl p-6">
       <header className="mb-6 flex items-center justify-between">
@@ -64,30 +67,17 @@ export default async function RoomsPage() {
       <RoomsActions />
 
       <Panel title="Your rooms" className="mt-6">
-        {rooms && rooms.length > 0 ? (
+        {activeRooms.length > 0 ? (
           <ul className="divide-y divide-neutral-800">
-            {rooms.map((room) => {
-              const role = room.dm_id === user.id ? "dm" : roleByRoom.get(room.id);
-              return (
-                <li key={room.id}>
-                  <Link
-                    href={`/rooms/${room.id}`}
-                    className="flex items-center justify-between px-1 py-3 hover:text-amber-300"
-                  >
-                    <span className="font-medium">{room.name}</span>
-                    <Badge
-                      className={
-                        role === "dm"
-                          ? "bg-amber-500/15 text-amber-300"
-                          : "bg-sky-500/15 text-sky-300"
-                      }
-                    >
-                      {role === "dm" ? "DM" : "Player"}
-                    </Badge>
-                  </Link>
-                </li>
-              );
-            })}
+            {activeRooms.map((room) => (
+              <RoomRow
+                key={room.id}
+                id={room.id}
+                name={room.name}
+                role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "player")}
+                archived={false}
+              />
+            ))}
           </ul>
         ) : (
           <p className="text-sm text-neutral-500">
@@ -95,6 +85,27 @@ export default async function RoomsPage() {
           </p>
         )}
       </Panel>
+
+      {archivedRooms.length > 0 && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-neutral-500 hover:text-neutral-300">
+            Archived ({archivedRooms.length})
+          </summary>
+          <Panel title="Archived rooms" className="mt-2">
+            <ul className="divide-y divide-neutral-800 opacity-70">
+              {archivedRooms.map((room) => (
+                <RoomRow
+                  key={room.id}
+                  id={room.id}
+                  name={room.name}
+                  role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "player")}
+                  archived
+                />
+              ))}
+            </ul>
+          </Panel>
+        </details>
+      )}
     </main>
   );
 }
