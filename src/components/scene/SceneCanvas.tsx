@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Circle, Image as KonvaImage, Layer, Line, Stage } from "react-konva";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Circle,
+  Group,
+  Image as KonvaImage,
+  Layer,
+  Line,
+  Rect,
+  Stage,
+  Text,
+} from "react-konva";
 import type Konva from "konva";
 
 import { useImage } from "@/lib/useImage";
@@ -26,6 +35,15 @@ export function SceneCanvas({
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ scale: 0.6, x: 40, y: 40 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [ruler, setRuler] = useState<{
+    startX: number;
+    startY: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [measuring, setMeasuring] = useState(false);
+  const [measureMenu, setMeasureMenu] = useState(false);
+  const measureDrawing = useRef(false);
 
   const [mapImage] = useImage(scene.map_url);
 
@@ -79,6 +97,53 @@ export function SceneCanvas({
     });
   }
 
+  // Distance in feet — D&D "every square counts the same" (Chebyshev) metric.
+  const feetBetween = useCallback(
+    (ax: number, ay: number, bx: number, by: number) => {
+      const squares =
+        Math.max(Math.abs(bx - ax), Math.abs(by - ay)) / scene.grid_size;
+      return Math.round(squares * scene.feet_per_square);
+    },
+    [scene.grid_size, scene.feet_per_square],
+  );
+  const rulerFeet = ruler
+    ? feetBetween(ruler.startX, ruler.startY, ruler.x, ruler.y)
+    : 0;
+
+  const worldPointer = (e: Konva.KonvaEventObject<unknown>) =>
+    e.target.getStage()?.getRelativePointerPosition() ?? null;
+
+  function exitMeasure() {
+    setMeasuring(false);
+    setMeasureMenu(false);
+    measureDrawing.current = false;
+    setRuler(null);
+  }
+
+  function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (measuring) {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (!p) return;
+      measureDrawing.current = true;
+      setRuler({ startX: p.x, startY: p.y, x: p.x, y: p.y });
+      return;
+    }
+    if (e.target === e.target.getStage()) setSelectedId(null);
+  }
+
+  function stagePointerMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (!measuring || !measureDrawing.current) return;
+    const p = worldPointer(e);
+    if (p) setRuler((r) => (r ? { ...r, x: p.x, y: p.y } : r));
+  }
+
+  function stagePointerUp() {
+    // The ruler only lives during the interaction — clear it on release.
+    measureDrawing.current = false;
+    setRuler(null);
+  }
+
   async function moveToken(id: string, rawX: number, rawY: number) {
     let x = rawX;
     let y = rawY;
@@ -109,7 +174,7 @@ export function SceneCanvas({
       <Stage
         width={size.w}
         height={size.h}
-        draggable
+        draggable={!measuring}
         x={view.x}
         y={view.y}
         scaleX={view.scale}
@@ -121,9 +186,13 @@ export function SceneCanvas({
             setView((v) => ({ ...v, x: e.target.x(), y: e.target.y() }));
           }
         }}
-        onMouseDown={(e) => {
-          if (e.target === e.target.getStage()) setSelectedId(null);
-        }}
+        onMouseDown={stagePointerDown}
+        onMouseMove={stagePointerMove}
+        onMouseUp={stagePointerUp}
+        onTouchStart={stagePointerDown}
+        onTouchMove={stagePointerMove}
+        onTouchEnd={stagePointerUp}
+        style={measuring ? { cursor: "crosshair" } : undefined}
       >
         <Layer listening={false}>
           {mapImage && (
@@ -155,23 +224,131 @@ export function SceneCanvas({
                   key={t.id}
                   token={t}
                   gridSize={scene.grid_size}
-                  draggable={isDM || owned}
+                  draggable={(isDM || owned) && !measuring}
                   owned={owned}
                   selected={t.id === selectedId}
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
                   onSelect={() => isDM && setSelectedId(t.id)}
-                  onDragEnd={(x, y) => moveToken(t.id, x, y)}
+                  onDragStart={() =>
+                    setRuler({ startX: t.x, startY: t.y, x: t.x, y: t.y })
+                  }
+                  onDragMove={(x, y) =>
+                    setRuler((r) => (r ? { ...r, x, y } : r))
+                  }
+                  onDragEnd={(x, y) => {
+                    setRuler(null);
+                    moveToken(t.id, x, y);
+                  }}
                 />
               );
             })}
           {/* ping marker at origin for orientation */}
           <Circle x={0} y={0} radius={3} fill="#f59e0b" listening={false} />
         </Layer>
+
+        {ruler && (
+          <Layer listening={false}>
+            <Line
+              points={[ruler.startX, ruler.startY, ruler.x, ruler.y]}
+              stroke="#f59e0b"
+              strokeWidth={2 / view.scale}
+              dash={[10 / view.scale, 6 / view.scale]}
+            />
+            <Circle
+              x={ruler.startX}
+              y={ruler.startY}
+              radius={4 / view.scale}
+              fill="#f59e0b"
+            />
+            <Group x={ruler.x} y={ruler.y} scaleX={1 / view.scale} scaleY={1 / view.scale}>
+              <Rect
+                x={14}
+                y={-30}
+                width={Math.max(46, 12 + String(rulerFeet).length * 11)}
+                height={22}
+                cornerRadius={4}
+                fill="#0a0a0a"
+                stroke="#f59e0b"
+                strokeWidth={1}
+              />
+              <Text
+                x={14}
+                y={-30}
+                width={Math.max(46, 12 + String(rulerFeet).length * 11)}
+                height={22}
+                text={`${rulerFeet} ft`}
+                fontSize={13}
+                fontStyle="bold"
+                fill="#f5f5f5"
+                align="center"
+                verticalAlign="middle"
+              />
+            </Group>
+          </Layer>
+        )}
       </Stage>
 
-      <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-neutral-900/80 px-2 py-1 text-[10px] text-neutral-400">
-        scroll to zoom · drag background to pan · {Math.round(view.scale * 100)}%
+      <div className="absolute bottom-2 left-2 flex items-end gap-2">
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setMeasureMenu((o) => !o)}
+            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+              measuring
+                ? "border-amber-400 bg-amber-400/20 text-amber-200"
+                : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+            }`}
+          >
+            📏 {measuring ? "Measuring…" : "Measure"}
+          </button>
+
+          {measureMenu && (
+            <div className="absolute bottom-full left-0 mb-1 w-48 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl">
+              <button
+                type="button"
+                onClick={() => {
+                  exitMeasure();
+                  toast.info("Drag a token — the ruler shows its move in ft");
+                }}
+                className="block w-full px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
+              >
+                Measure movement
+                <span className="block text-[10px] text-neutral-500">
+                  while dragging a token
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setRuler(null);
+                  setMeasuring(true);
+                  setMeasureMenu(false);
+                }}
+                className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
+              >
+                Free distance
+                <span className="block text-[10px] text-neutral-500">
+                  drag a line anywhere on the map
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        {measuring && (
+          <button
+            type="button"
+            onClick={exitMeasure}
+            className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+          >
+            Done
+          </button>
+        )}
+
+        <span className="pointer-events-none rounded bg-neutral-900/80 px-2 py-1 text-[10px] text-neutral-400">
+          {Math.round(view.scale * 100)}%
+        </span>
       </div>
 
       {isDM && selectedToken && (

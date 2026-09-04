@@ -17,11 +17,13 @@ export function SceneSettings({
   const toast = useToast();
   const [mapUrl, setMapUrl] = useState(scene.map_url ?? "");
   const [gridSize, setGridSize] = useState(String(scene.grid_size));
+  const [feet, setFeet] = useState(String(scene.feet_per_square));
 
   useEffect(() => {
     setMapUrl(scene.map_url ?? "");
     setGridSize(String(scene.grid_size));
-  }, [scene.id, scene.map_url, scene.grid_size]);
+    setFeet(String(scene.feet_per_square));
+  }, [scene.id, scene.map_url, scene.grid_size, scene.feet_per_square]);
 
   async function update(patch: SceneUpdate) {
     const { error } = await room.supabase
@@ -66,6 +68,27 @@ export function SceneSettings({
               size="sm"
               onClick={() =>
                 update({ grid_size: Math.max(10, Number(gridSize) || 70) })
+              }
+            >
+              Set
+            </Button>
+          </div>
+        </div>
+
+        <div>
+          <Label htmlFor="feetPerSquare">Feet per square</Label>
+          <div className="flex gap-1">
+            <Input
+              id="feetPerSquare"
+              type="number"
+              min={1}
+              value={feet}
+              onChange={(e) => setFeet(e.target.value)}
+            />
+            <Button
+              size="sm"
+              onClick={() =>
+                update({ feet_per_square: Math.max(1, Number(feet) || 5) })
               }
             >
               Set

@@ -82,6 +82,7 @@ export interface Database {
           grid_size: number;
           grid_enabled: boolean;
           snap_to_grid: boolean;
+          feet_per_square: number;
           position: number;
           round: number;
           active_combatant_id: string | null;
@@ -95,6 +96,7 @@ export interface Database {
           grid_size?: number;
           grid_enabled?: boolean;
           snap_to_grid?: boolean;
+          feet_per_square?: number;
           position?: number;
           round?: number;
           active_combatant_id?: string | null;
@@ -107,6 +109,7 @@ export interface Database {
           grid_size?: number;
           grid_enabled?: boolean;
           snap_to_grid?: boolean;
+          feet_per_square?: number;
           position?: number;
           round?: number;
           active_combatant_id?: string | null;
