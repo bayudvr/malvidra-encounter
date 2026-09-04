@@ -22,6 +22,17 @@ import { TokenSprite } from "@/components/scene/TokenSprite";
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
 
+// D&D 5e size categories -> grid-square footprint. Small and Medium are
+// mechanically identical (1 square) per the rules — that's not a bug here.
+const DND_SIZES = [
+  { label: "Tiny", value: 0.5 },
+  { label: "Small", value: 1 },
+  { label: "Medium", value: 1 },
+  { label: "Large", value: 2 },
+  { label: "Huge", value: 3 },
+  { label: "Gargantuan", value: 4 },
+];
+
 export function SceneCanvas({
   room,
   scene,
@@ -514,21 +525,19 @@ function TokenInspector({
         ))}
       </select>
 
-      <div className="mb-2 flex items-center gap-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs text-neutral-500">Size</span>
-        {[1, 2, 3].map((s) => (
-          <button
-            key={s}
-            onClick={() => update({ size: s })}
-            className={`rounded px-2 py-0.5 text-xs ${
-              token.size === s
-                ? "bg-amber-500 text-neutral-950"
-                : "bg-neutral-800"
-            }`}
-          >
-            {s}
-          </button>
-        ))}
+        <select
+          value={token.size}
+          onChange={(e) => update({ size: Number(e.target.value) })}
+          className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs"
+        >
+          {DND_SIZES.map((s) => (
+            <option key={s.label} value={s.value}>
+              {s.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <label className="mb-2 flex items-center gap-2 text-xs text-neutral-300">
