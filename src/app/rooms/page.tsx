@@ -52,6 +52,40 @@ export default async function RoomsPage() {
   const activeRooms = (rooms ?? []).filter((r) => !r.archived_at);
   const archivedRooms = (rooms ?? []).filter((r) => r.archived_at);
 
+  // Which of these rooms is it this user's turn in right now? Only matters
+  // for scenes currently in combat, so async multi-room DMs/players can see
+  // at a glance which mission needs them without opening each one.
+  const activeSceneIds = (rooms ?? [])
+    .map((r) => r.active_scene_id)
+    .filter((id): id is string => !!id);
+
+  const yourTurnRoomIds = new Set<string>();
+  if (activeSceneIds.length > 0) {
+    const { data: combatScenes } = await supabase
+      .from("scenes")
+      .select("room_id, active_combatant_id")
+      .in("id", activeSceneIds)
+      .eq("mode", "combat");
+
+    const combatantIds = (combatScenes ?? [])
+      .map((s) => s.active_combatant_id)
+      .filter((id): id is string => !!id);
+
+    if (combatantIds.length > 0) {
+      const { data: yourCombatants } = await supabase
+        .from("combatants")
+        .select("id")
+        .in("id", combatantIds)
+        .eq("user_id", user.id);
+      const yourIds = new Set((yourCombatants ?? []).map((c) => c.id));
+      for (const s of combatScenes ?? []) {
+        if (s.active_combatant_id && yourIds.has(s.active_combatant_id)) {
+          yourTurnRoomIds.add(s.room_id);
+        }
+      }
+    }
+  }
+
   return (
     <main className="mx-auto w-full max-w-3xl p-6">
       <header className="mb-6 flex items-center justify-between">
@@ -76,6 +110,7 @@ export default async function RoomsPage() {
                 name={room.name}
                 role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "player")}
                 archived={false}
+                yourTurn={yourTurnRoomIds.has(room.id)}
               />
             ))}
           </ul>

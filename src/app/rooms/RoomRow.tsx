@@ -12,11 +12,13 @@ export function RoomRow({
   name,
   role,
   archived,
+  yourTurn,
 }: {
   id: string;
   name: string;
   role: "dm" | "player";
   archived: boolean;
+  yourTurn?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -38,9 +40,18 @@ export function RoomRow({
     <li>
       <Link
         href={`/rooms/${id}`}
-        className="flex items-center justify-between gap-2 px-1 py-3 hover:text-amber-300"
+        className={`flex items-center justify-between gap-2 rounded px-1 py-3 hover:text-amber-300 ${
+          yourTurn ? "bg-amber-500/10" : ""
+        }`}
       >
-        <span className="truncate font-medium">{name}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-medium">{name}</span>
+          {yourTurn && (
+            <Badge className="animate-pulse bg-amber-500/25 text-amber-300">
+              🎯 Your turn
+            </Badge>
+          )}
+        </span>
         <span className="flex shrink-0 items-center gap-2">
           <Badge
             className={
