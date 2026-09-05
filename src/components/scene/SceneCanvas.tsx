@@ -465,7 +465,8 @@ export function SceneCanvas({
   }
 
   // Drop target for a token portrait dragged out of the library panel. The
-  // token lands where the cursor is, snapped like any other token.
+  // token lands where the cursor is (snapped like any other token) and starts
+  // hidden so the DM can place/adjust it before revealing it to players.
   async function handleAssetDrop(e: React.DragEvent) {
     e.preventDefault();
     if (!isDM) return;
@@ -493,6 +494,7 @@ export function SceneCanvas({
         image_url: payload.imageUrl,
         x: world.x,
         y: world.y,
+        is_hidden: true,
       })
       .select()
       .single();

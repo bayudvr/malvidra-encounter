@@ -73,7 +73,9 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     if (!scene) return toast.error("Open a scene first");
     const g = scene.grid_size;
     // Center of cell (2,2) so a freshly-dropped token already sits neatly
-    // inside a square instead of straddling grid lines.
+    // inside a square instead of straddling grid lines. Starts hidden so the
+    // DM can position/adjust it before revealing it to players — same as a
+    // token dragged straight onto the map.
     const { error } = await room.supabase.from("tokens").insert({
       scene_id: scene.id,
       room_id: room.room!.id,
@@ -82,6 +84,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
       image_url: imageUrl,
       x: g * 2 + g / 2,
       y: g * 2 + g / 2,
+      is_hidden: true,
     });
     if (error) toast.error(error.message);
     else room.reloadScene();
