@@ -45,6 +45,26 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     else room.reload();
   }
 
+  // Changing the library image also pushes it onto every token already
+  // dropped from this asset — tokens copy image_url at drop time instead of
+  // referencing the asset live, so without this a re-skin would only affect
+  // future drops.
+  async function updateAssetImage(id: string, newUrl: string) {
+    const trimmed = newUrl.trim() || null;
+    const { error } = await room.supabase
+      .from("assets")
+      .update({ image_url: trimmed })
+      .eq("id", id);
+    if (error) return toast.error(error.message);
+    const { error: tokenError } = await room.supabase
+      .from("tokens")
+      .update({ image_url: trimmed })
+      .eq("asset_id", id);
+    if (tokenError) toast.error(tokenError.message);
+    room.reload();
+    room.reloadScene();
+  }
+
   async function dropToScene(
     assetId: string,
     label: string,
@@ -76,6 +96,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
             asset={a}
             canDrop={!!scene}
             onRename={(newName) => renameAsset(a.id, newName)}
+            onImageChange={(newUrl) => updateAssetImage(a.id, newUrl)}
             onDrop={() => dropToScene(a.id, a.name, a.image_url)}
             onDelete={() => deleteAsset(a.id)}
           />
@@ -113,50 +134,62 @@ function AssetRow({
   asset,
   canDrop,
   onRename,
+  onImageChange,
   onDrop,
   onDelete,
 }: {
   asset: Asset;
   canDrop: boolean;
   onRename: (name: string) => void;
+  onImageChange: (url: string) => void;
   onDrop: () => void;
   onDelete: () => void;
 }) {
   const [name, setName] = useState(asset.name);
+  const [imageUrl, setImageUrl] = useState(asset.image_url ?? "");
 
   return (
-    <li className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-neutral-800/50">
-      {asset.image_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={asset.image_url}
-          alt=""
-          className="h-7 w-7 shrink-0 rounded-full object-cover"
+    <li className="space-y-1 rounded px-1 py-1 text-sm hover:bg-neutral-800/50">
+      <div className="flex items-center gap-2">
+        {asset.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={asset.image_url}
+            alt=""
+            className="h-7 w-7 shrink-0 rounded-full object-cover"
+          />
+        ) : (
+          <span
+            style={{ background: colorFromString(asset.name) }}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-neutral-950"
+          >
+            {tokenInitials(asset.name)}
+          </span>
+        )}
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => (name.trim() ? onRename(name) : setName(asset.name))}
+          className="min-w-0 flex-1 truncate rounded bg-transparent px-1 py-0.5 hover:bg-neutral-800 focus:bg-neutral-800 focus:outline-none"
         />
-      ) : (
-        <span
-          style={{ background: colorFromString(asset.name) }}
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-neutral-950"
+        <Button size="sm" variant="ghost" onClick={onDrop} disabled={!canDrop}>
+          + Scene
+        </Button>
+        <button
+          className="px-1 text-neutral-500 hover:text-red-400"
+          onClick={onDelete}
+          aria-label="Delete asset"
         >
-          {tokenInitials(asset.name)}
-        </span>
-      )}
+          ✕
+        </button>
+      </div>
       <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={() => (name.trim() ? onRename(name) : setName(asset.name))}
-        className="min-w-0 flex-1 truncate rounded bg-transparent px-1 py-0.5 hover:bg-neutral-800 focus:bg-neutral-800 focus:outline-none"
+        value={imageUrl}
+        onChange={(e) => setImageUrl(e.target.value)}
+        onBlur={() => imageUrl !== (asset.image_url ?? "") && onImageChange(imageUrl)}
+        placeholder="Image URL (optional)"
+        className="ml-9 w-[calc(100%-2.25rem)] truncate rounded bg-transparent px-1 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 focus:bg-neutral-800 focus:text-neutral-200 focus:outline-none"
       />
-      <Button size="sm" variant="ghost" onClick={onDrop} disabled={!canDrop}>
-        + Scene
-      </Button>
-      <button
-        className="px-1 text-neutral-500 hover:text-red-400"
-        onClick={onDelete}
-        aria-label="Delete asset"
-      >
-        ✕
-      </button>
     </li>
   );
 }
