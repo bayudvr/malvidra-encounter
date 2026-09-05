@@ -11,7 +11,7 @@ drop table if exists public.fog_doors;
 -- fog_polygons: a freehand closed room shape. Its interior is revealed the
 -- moment it exists — deleting the row re-covers that area.
 -------------------------------------------------------------------------------
-create table public.fog_polygons (
+create table if not exists public.fog_polygons (
   id uuid primary key default gen_random_uuid(),
   scene_id uuid not null references public.scenes (id) on delete cascade,
   room_id uuid not null references public.rooms (id) on delete cascade,
@@ -21,8 +21,8 @@ create table public.fog_polygons (
 
 alter table public.fog_polygons enable row level security;
 alter table public.fog_polygons replica identity full;
-create index fog_polygons_scene_idx on public.fog_polygons (scene_id);
-create index fog_polygons_room_idx on public.fog_polygons (room_id);
+create index if not exists fog_polygons_scene_idx on public.fog_polygons (scene_id);
+create index if not exists fog_polygons_room_idx on public.fog_polygons (room_id);
 
 -------------------------------------------------------------------------------
 -- fog_doors: a wall segment (placed on a polygon's edge) that blocks token
@@ -30,7 +30,7 @@ create index fog_polygons_room_idx on public.fog_polygons (room_id);
 -- index by design -- it's just a line segment -- so editing a polygon's
 -- shape later can't orphan or misalign a door.
 -------------------------------------------------------------------------------
-create table public.fog_doors (
+create table if not exists public.fog_doors (
   id uuid primary key default gen_random_uuid(),
   scene_id uuid not null references public.scenes (id) on delete cascade,
   room_id uuid not null references public.rooms (id) on delete cascade,
@@ -44,8 +44,8 @@ create table public.fog_doors (
 
 alter table public.fog_doors enable row level security;
 alter table public.fog_doors replica identity full;
-create index fog_doors_scene_idx on public.fog_doors (scene_id);
-create index fog_doors_room_idx on public.fog_doors (room_id);
+create index if not exists fog_doors_scene_idx on public.fog_doors (scene_id);
+create index if not exists fog_doors_room_idx on public.fog_doors (room_id);
 
 -------------------------------------------------------------------------------
 -- RLS + realtime: same room-scoped pattern as 0001/0011 (re-declared since
