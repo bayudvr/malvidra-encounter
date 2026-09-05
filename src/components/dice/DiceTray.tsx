@@ -35,8 +35,12 @@ function buildNotation(pool: Record<number, number>, mod: number, advMode: AdvMo
       parts.push(`${pool[s]}d${s}`);
     }
   }
-  if (mod) parts.push(mod > 0 ? `+${mod}` : `${mod}`);
-  return parts.join(" + ");
+  let notation = parts.join(" + ");
+  // Append separately rather than joining an already-signed "+1"/"-1" string
+  // in with the rest — that doubled up as "+ +1" and silently dropped the
+  // modifier (the parser didn't recognize it, so mods came back empty).
+  if (mod) notation += mod > 0 ? ` + ${mod}` : ` - ${Math.abs(mod)}`;
+  return notation;
 }
 
 // Walk a dice-parser-interface FinalRollResult tree, collecting every
