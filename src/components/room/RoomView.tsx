@@ -15,6 +15,7 @@ import { AssetPanel } from "@/components/room/AssetPanel";
 import { RoomWebhookPanel } from "@/components/room/RoomWebhookPanel";
 import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
+import { PlayerRequests } from "@/components/room/PlayerRequests";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
 import { DiceTray } from "@/components/dice/DiceTray";
@@ -99,6 +100,7 @@ export function RoomView({
               Player view
             </span>
           )}
+          <PlayerRequests room={room} isDM={isDM} />
           {inCombat && isDM && (
             <button
               type="button"

@@ -328,6 +328,23 @@ export interface Database {
         };
         Relationships: [];
       };
+      player_requests: {
+        Row: {
+          id: string;
+          room_id: string;
+          user_id: string;
+          note: string | null;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          room_id: string;
+          user_id: string;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {

@@ -8,6 +8,7 @@ export type Combatant = Tables<"combatants">;
 export type RoomWebhook = Tables<"room_webhooks">;
 export type FogPolygon = Tables<"fog_polygons">;
 export type FogDoor = Tables<"fog_doors">;
+export type PlayerRequest = Tables<"player_requests">;
 
 export type SceneUpdate = Database["public"]["Tables"]["scenes"]["Update"];
 export type TokenUpdate = Database["public"]["Tables"]["tokens"]["Update"];
