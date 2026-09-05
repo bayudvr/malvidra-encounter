@@ -1285,6 +1285,24 @@ function TokenInspector({
   }
 
   const players = room.members.filter((m) => m.role === "player");
+  const inCombat = room.activeScene?.mode === "combat";
+  const existingCombatant = room.combatants.find(
+    (c) => c.token_id === token.id,
+  );
+
+  async function addToCombat() {
+    const { error } = await room.supabase.from("combatants").insert({
+      scene_id: token.scene_id,
+      room_id: token.room_id,
+      name: token.label,
+      is_player: !!token.owner_user_id,
+      user_id: token.owner_user_id,
+      token_id: token.id,
+      sort_order: room.combatants.length,
+    });
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
 
   return (
     <div className="absolute right-2 top-2 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm shadow-xl">
@@ -1342,6 +1360,20 @@ function TokenInspector({
         />
         Hidden from players
       </label>
+
+      {inCombat &&
+        (existingCombatant ? (
+          <p className="mb-2 text-center text-xs text-neutral-500">
+            Already in combat
+          </p>
+        ) : (
+          <button
+            onClick={addToCombat}
+            className="mb-2 w-full rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-500"
+          >
+            Add to combat
+          </button>
+        ))}
 
       <button
         onClick={async () => {
