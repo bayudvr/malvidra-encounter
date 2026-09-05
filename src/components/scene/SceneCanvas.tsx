@@ -127,6 +127,19 @@ export function SceneCanvas({
   const [polyCursor, setPolyCursor] = useState<Pt | null>(null);
   const [addingDoor, setAddingDoor] = useState(false);
 
+  const [aoeMenu, setAoeMenu] = useState(false);
+  const [aoeMode, setAoeMode] = useState<
+    "cone" | "line" | "cube" | "circle" | null
+  >(null);
+  const [aoeLineWidthFt, setAoeLineWidthFt] = useState(5);
+  const [aoe, setAoe] = useState<{
+    originX: number;
+    originY: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const aoeDrawing = useRef(false);
+
   const [mapImage] = useImage(scene.map_url);
 
   // Reset selection and any in-progress map tool when scene changes
@@ -135,6 +148,8 @@ export function SceneCanvas({
     setDrawingPolygon(false);
     setPolygonPoints([]);
     setAddingDoor(false);
+    setAoeMode(null);
+    setAoe(null);
   }, [scene.id]);
 
   useEffect(() => {
@@ -197,6 +212,15 @@ export function SceneCanvas({
     ? feetBetween(ruler.startX, ruler.startY, ruler.x, ruler.y)
     : 0;
 
+  // Straight-line (Euclidean) feet, for AOE template sizes — a cone's reach
+  // or a circle's radius isn't grid-diagonal token movement, so it doesn't
+  // use feetBetween's Chebyshev metric.
+  const feetFromPixels = useCallback(
+    (pixels: number) =>
+      Math.round((pixels / scene.grid_size) * scene.feet_per_square),
+    [scene.grid_size, scene.feet_per_square],
+  );
+
   const worldPointer = (e: Konva.KonvaEventObject<unknown>) =>
     e.target.getStage()?.getRelativePointerPosition() ?? null;
 
@@ -205,6 +229,13 @@ export function SceneCanvas({
     setMeasureMenu(false);
     measureDrawing.current = false;
     setRuler(null);
+  }
+
+  function exitAoe() {
+    setAoeMode(null);
+    setAoeMenu(false);
+    aoeDrawing.current = false;
+    setAoe(null);
   }
 
   // Pinch-to-zoom (two-finger) on touch devices.
@@ -261,6 +292,14 @@ export function SceneCanvas({
       if (p) placeDoorNear(p);
       return;
     }
+    if (aoeMode) {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (!p) return;
+      aoeDrawing.current = true;
+      setAoe({ originX: p.x, originY: p.y, x: p.x, y: p.y });
+      return;
+    }
     if (measuring) {
       e.evt.preventDefault();
       const p = worldPointer(e);
@@ -282,12 +321,23 @@ export function SceneCanvas({
       if (p) setPolyCursor(p);
       return;
     }
+    if (aoeMode && aoeDrawing.current) {
+      const p = worldPointer(e);
+      if (p) setAoe((a) => (a ? { ...a, x: p.x, y: p.y } : a));
+      return;
+    }
     if (!measuring || !measureDrawing.current) return;
     const p = worldPointer(e);
     if (p) setRuler((r) => (r ? { ...r, x: p.x, y: p.y } : r));
   }
 
   function stagePointerUp() {
+    if (aoeMode) {
+      // Non-permanent by design — the shape only lives during the drag.
+      aoeDrawing.current = false;
+      setAoe(null);
+      return;
+    }
     // The ruler only lives during the interaction — clear it on release.
     measureDrawing.current = false;
     lastPinch.current = null;
@@ -536,7 +586,7 @@ export function SceneCanvas({
         ref={stageRef}
         width={size.w}
         height={size.h}
-        draggable={!measuring && !drawingPolygon && !addingDoor}
+        draggable={!measuring && !drawingPolygon && !addingDoor && !aoeMode}
         x={view.x}
         y={view.y}
         scaleX={view.scale}
@@ -560,7 +610,7 @@ export function SceneCanvas({
         onTouchMove={stagePointerMove}
         onTouchEnd={stagePointerUp}
         style={
-          measuring || drawingPolygon || addingDoor
+          measuring || drawingPolygon || addingDoor || aoeMode
             ? { cursor: "crosshair" }
             : undefined
         }
@@ -605,7 +655,8 @@ export function SceneCanvas({
                     (isDM || owned) &&
                     !measuring &&
                     !drawingPolygon &&
-                    !addingDoor
+                    !addingDoor &&
+                    !aoeMode
                   }
                   owned={owned}
                   selected={t.id === selectedId}
@@ -615,6 +666,7 @@ export function SceneCanvas({
                     isDM &&
                     !drawingPolygon &&
                     !addingDoor &&
+                    !aoeMode &&
                     setSelectedId(t.id)
                   }
                   onDragStart={(e) => handleTokenDragStart(t, e)}
@@ -784,6 +836,20 @@ export function SceneCanvas({
             </Group>
           </Layer>
         )}
+
+        {aoe && (
+          <Layer listening={false}>
+            <AoeShape
+              mode={aoeMode}
+              aoe={aoe}
+              lineWidthPx={
+                (aoeLineWidthFt / scene.feet_per_square) * scene.grid_size
+              }
+              feetFromPixels={feetFromPixels}
+              viewScale={view.scale}
+            />
+          </Layer>
+        )}
       </Stage>
 
       <div className="absolute bottom-2 left-2 flex items-end gap-2">
@@ -823,6 +889,7 @@ export function SceneCanvas({
                   setMeasureMenu(false);
                   cancelPolygon();
                   setAddingDoor(false);
+                  exitAoe();
                 }}
                 className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
               >
@@ -852,6 +919,7 @@ export function SceneCanvas({
               onClick={() => {
                 setFogMenu((o) => !o);
                 exitMeasure();
+                exitAoe();
               }}
               className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
                 drawingPolygon || addingDoor
@@ -934,6 +1002,71 @@ export function SceneCanvas({
           </div>
         )}
 
+        <div className="relative flex items-end gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setAoeMenu((o) => !o);
+              exitMeasure();
+              cancelPolygon();
+              setAddingDoor(false);
+            }}
+            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+              aoeMode
+                ? "border-amber-400 bg-amber-400/20 text-amber-200"
+                : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+            }`}
+          >
+            📐 {aoeMode ? `${aoeMode[0].toUpperCase()}${aoeMode.slice(1)}…` : "AOE"}
+          </button>
+
+          {aoeMenu && (
+            <div className="absolute bottom-full left-0 mb-1 w-44 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl">
+              {(["cone", "line", "cube", "circle"] as const).map((shape) => (
+                <button
+                  key={shape}
+                  type="button"
+                  onClick={() => {
+                    setAoeMode(shape);
+                    setAoeMenu(false);
+                  }}
+                  className="block w-full border-t border-neutral-800 px-3 py-2 text-left capitalize text-neutral-200 first:border-t-0 hover:bg-neutral-800"
+                >
+                  {shape}
+                  {shape === "circle" ? " (radius)" : ""}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {aoeMode === "line" && (
+            <label className="flex items-center gap-1 rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-300">
+              width
+              <input
+                type="number"
+                min={5}
+                step={5}
+                value={aoeLineWidthFt}
+                onChange={(e) =>
+                  setAoeLineWidthFt(Math.max(5, Number(e.target.value) || 5))
+                }
+                className="w-10 rounded border border-neutral-700 bg-neutral-950 px-1 text-center"
+              />
+              ft
+            </label>
+          )}
+
+          {aoeMode && (
+            <button
+              type="button"
+              onClick={exitAoe}
+              className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              Done
+            </button>
+          )}
+        </div>
+
         <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200">
           <button
             type="button"
@@ -966,6 +1099,143 @@ export function SceneCanvas({
         />
       )}
     </div>
+  );
+}
+
+// Renders the live (non-persistent) AOE template preview while dragging —
+// disappears on mouse-up, nothing is ever saved to the DB.
+function AoeShape({
+  mode,
+  aoe,
+  lineWidthPx,
+  feetFromPixels,
+  viewScale,
+}: {
+  mode: "cone" | "line" | "cube" | "circle" | null;
+  aoe: { originX: number; originY: number; x: number; y: number };
+  lineWidthPx: number;
+  feetFromPixels: (pixels: number) => number;
+  viewScale: number;
+}) {
+  if (!mode) return null;
+
+  const dx = aoe.x - aoe.originX;
+  const dy = aoe.y - aoe.originY;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 1) return null;
+
+  const stroke = "#c084fc";
+  const fill = "rgba(192,132,252,0.28)";
+
+  function label(x: number, y: number, text: string) {
+    const w = 10 + text.length * 7;
+    return (
+      <Group x={x} y={y} scaleX={1 / viewScale} scaleY={1 / viewScale}>
+        <Rect
+          x={8}
+          y={-11}
+          width={w}
+          height={22}
+          cornerRadius={4}
+          fill="#0a0a0a"
+          stroke={stroke}
+          strokeWidth={1}
+        />
+        <Text
+          x={8}
+          y={-11}
+          width={w}
+          height={22}
+          text={text}
+          fontSize={13}
+          fontStyle="bold"
+          fill="#f5f5f5"
+          align="center"
+          verticalAlign="middle"
+        />
+      </Group>
+    );
+  }
+
+  if (mode === "circle") {
+    return (
+      <>
+        <Circle
+          x={aoe.originX}
+          y={aoe.originY}
+          radius={dist}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={2 / viewScale}
+        />
+        {label(aoe.x, aoe.y, `${feetFromPixels(dist)} ft`)}
+      </>
+    );
+  }
+
+  if (mode === "cube") {
+    const side = Math.max(Math.abs(dx), Math.abs(dy));
+    const x0 = dx >= 0 ? aoe.originX : aoe.originX - side;
+    const y0 = dy >= 0 ? aoe.originY : aoe.originY - side;
+    return (
+      <>
+        <Rect
+          x={x0}
+          y={y0}
+          width={side}
+          height={side}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={2 / viewScale}
+        />
+        {label(aoe.x, aoe.y, `${feetFromPixels(side)} ft`)}
+      </>
+    );
+  }
+
+  const dirX = dx / dist;
+  const dirY = dy / dist;
+
+  if (mode === "line") {
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    return (
+      <>
+        <Group x={aoe.originX} y={aoe.originY} rotation={angle}>
+          <Rect
+            x={0}
+            y={-lineWidthPx / 2}
+            width={dist}
+            height={lineWidthPx}
+            fill={fill}
+            stroke={stroke}
+            strokeWidth={2 / viewScale}
+          />
+        </Group>
+        {label(aoe.x, aoe.y, `${feetFromPixels(dist)} ft`)}
+      </>
+    );
+  }
+
+  // Cone — D&D 5e RAW: a cone's width at a point along its length equals
+  // that point's distance from the origin (a fixed ~53° apex angle).
+  const perpX = -dirY;
+  const perpY = dirX;
+  const halfWidth = dist / 2;
+  const p2x = aoe.originX + dirX * dist + perpX * halfWidth;
+  const p2y = aoe.originY + dirY * dist + perpY * halfWidth;
+  const p3x = aoe.originX + dirX * dist - perpX * halfWidth;
+  const p3y = aoe.originY + dirY * dist - perpY * halfWidth;
+  return (
+    <>
+      <Line
+        points={[aoe.originX, aoe.originY, p2x, p2y, p3x, p3y]}
+        closed
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={2 / viewScale}
+      />
+      {label(aoe.x, aoe.y, `${feetFromPixels(dist)} ft`)}
+    </>
   );
 }
 
