@@ -36,7 +36,7 @@ export function TokenSprite({
   combatant?: Combatant | null;
   /** Whether this viewer may see the combatant's HP / AC numbers. */
   revealStats?: boolean;
-  onDragStart?: () => void;
+  onDragStart?: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragMove?: (x: number, y: number) => void;
   onDragEnd: (x: number, y: number) => void;
   onSelect: () => void;
@@ -73,13 +73,14 @@ export function TokenSprite({
 
   return (
     <Group
+      id={token.id}
       x={token.x}
       y={token.y}
       draggable={draggable}
       opacity={token.is_hidden ? 0.35 : downed ? 0.55 : 1}
       onClick={onSelect}
       onTap={onSelect}
-      onDragStart={() => onDragStart?.()}
+      onDragStart={(e: Konva.KonvaEventObject<DragEvent>) => onDragStart?.(e)}
       onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
         onDragMove?.(e.target.x(), e.target.y());
       }}

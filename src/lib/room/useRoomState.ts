@@ -287,6 +287,17 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     }));
   }, []);
 
+  // Optimistic local insert (used right after creating a token, e.g. an
+  // alt-drag duplicate) so it appears instantly instead of waiting on the
+  // realtime round-trip. The later realtime INSERT is a no-op dedupe.
+  const addTokenLocal = useCallback((token: Token) => {
+    setState((prev) =>
+      prev.tokens.some((t) => t.id === token.id)
+        ? prev
+        : { ...prev, tokens: [...prev.tokens, token] },
+    );
+  }, []);
+
   return {
     ...state,
     supabase,
@@ -300,6 +311,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     reload: loadRoomBits,
     reloadScene: () => loadSceneBits(activeSceneRef.current),
     patchTokenLocal,
+    addTokenLocal,
   };
 }
 

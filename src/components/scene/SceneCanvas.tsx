@@ -16,11 +16,38 @@ import type Konva from "konva";
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
-import type { Combatant, Scene, TokenUpdate } from "@/lib/room/types";
+import type { Combatant, Scene, Token, TokenUpdate } from "@/lib/room/types";
 import { TokenSprite } from "@/components/scene/TokenSprite";
 
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
+
+// Splits a trailing " <number>" off a label, e.g. "Goblin 2" -> ("Goblin", 2).
+// A label with no trailing number is its own base with an implicit 0.
+function splitLabel(label: string): { base: string; num: number } {
+  const m = label.match(/^(.*\S)\s+(\d+)$/);
+  return m ? { base: m[1], num: parseInt(m[2], 10) } : { base: label, num: 0 };
+}
+
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Next default name for a duplicate: strips any existing " N" suffix off the
+// source label, then picks one past the highest " N" already used on a token
+// sharing that base name in the scene — so "Goblin" -> "Goblin 1" -> "Goblin 2".
+function nextDuplicateLabel(sourceLabel: string, tokens: Token[]): string {
+  const { base } = splitLabel(sourceLabel);
+  const re = new RegExp(`^${escapeRegExp(base)}(?:\\s+(\\d+))?$`);
+  let max = 0;
+  for (const t of tokens) {
+    const m = t.label.match(re);
+    if (!m) continue;
+    const n = m[1] ? parseInt(m[1], 10) : 0;
+    if (n > max) max = n;
+  }
+  return `${base} ${max + 1}`;
+}
 
 // D&D 5e size categories -> grid-square footprint. Small and Medium are
 // mechanically identical (1 square) per the rules — that's not a bug here.
@@ -43,6 +70,7 @@ export function SceneCanvas({
   const toast = useToast();
   const isDM = room.role === "dm";
   const wrapRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<Konva.Stage>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ scale: 0.6, x: 40, y: 40 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -237,6 +265,55 @@ export function SceneCanvas({
     if (error) toast.error(error.message);
   }
 
+  // Alt-drag a token to duplicate it: the original stays put, a new token is
+  // inserted at the same spot with an auto-numbered label ("Goblin" ->
+  // "Goblin 1", next one "Goblin 2", ...), and the drag carries on with the
+  // new token under the cursor.
+  async function duplicateToken(source: Token) {
+    const label = nextDuplicateLabel(source.label, room.tokens);
+    const { data, error } = await room.supabase
+      .from("tokens")
+      .insert({
+        scene_id: source.scene_id,
+        room_id: source.room_id,
+        asset_id: source.asset_id,
+        label,
+        image_url: source.image_url,
+        x: source.x,
+        y: source.y,
+        size: source.size,
+        color: source.color,
+        owner_user_id: source.owner_user_id,
+        is_hidden: source.is_hidden,
+      })
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error(error?.message ?? "Couldn't duplicate token");
+      return;
+    }
+    room.addTokenLocal(data);
+    setSelectedId(data.id);
+    setRuler({ startX: data.x, startY: data.y, x: data.x, y: data.y });
+    // The new token's Group hasn't mounted yet this tick — grab it once it
+    // has so the drag continues onto it without the user releasing/re-pressing.
+    requestAnimationFrame(() => {
+      stageRef.current?.findOne(`#${data.id}`)?.startDrag();
+    });
+  }
+
+  function handleTokenDragStart(
+    t: Token,
+    e: Konva.KonvaEventObject<DragEvent>,
+  ) {
+    if (isDM && e.evt?.altKey) {
+      e.target.stopDrag();
+      void duplicateToken(t);
+      return;
+    }
+    setRuler({ startX: t.x, startY: t.y, x: t.x, y: t.y });
+  }
+
   const selectedToken = room.tokens.find((t) => t.id === selectedId) ?? null;
 
   const inCombat = scene.mode === "combat";
@@ -249,6 +326,7 @@ export function SceneCanvas({
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
       <Stage
+        ref={stageRef}
         width={size.w}
         height={size.h}
         draggable={!measuring}
@@ -318,9 +396,7 @@ export function SceneCanvas({
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
                   onSelect={() => isDM && setSelectedId(t.id)}
-                  onDragStart={() =>
-                    setRuler({ startX: t.x, startY: t.y, x: t.x, y: t.y })
-                  }
+                  onDragStart={(e) => handleTokenDragStart(t, e)}
                   onDragMove={(x, y) =>
                     setRuler((r) => (r ? { ...r, x, y } : r))
                   }
