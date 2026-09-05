@@ -8,8 +8,10 @@ drop table if exists public.fog_cells;
 drop table if exists public.fog_doors;
 
 -------------------------------------------------------------------------------
--- fog_polygons: a freehand closed room shape. Its interior is revealed the
--- moment it exists — deleting the row re-covers that area.
+-- fog_polygons: a freehand closed room shape. The map is visible by default;
+-- a polygon's interior is covered by fog while the row exists (deleting it, or
+-- opening a door on its edge, reveals that area). [The original model was the
+-- inverse — whole-map fog with polygons as reveal holes — flipped 2026-09-06.]
 -------------------------------------------------------------------------------
 create table if not exists public.fog_polygons (
   id uuid primary key default gen_random_uuid(),

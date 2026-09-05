@@ -84,6 +84,29 @@ function closestPointOnSegment(p: Pt, a: Pt, b: Pt) {
   return { x: a.x + t * abx, y: a.y + t * aby, t };
 }
 
+// A door isn't stored with a polygon id on purpose (migration 0012), so
+// "which room does this door belong to" is recomputed: a door belongs to a
+// polygon when its midpoint sits on one of that polygon's edges. Doors are
+// placed exactly on an edge by placeDoorNear, so the tolerance only absorbs
+// floating-point drift.
+function doorOnPolygon(
+  door: { x1: number; y1: number; x2: number; y2: number },
+  points: [number, number][],
+  tol: number,
+) {
+  const mid = { x: (door.x1 + door.x2) / 2, y: (door.y1 + door.y2) / 2 };
+  for (let i = 0; i < points.length; i++) {
+    const a = { x: points[i][0], y: points[i][1] };
+    const b = {
+      x: points[(i + 1) % points.length][0],
+      y: points[(i + 1) % points.length][1],
+    };
+    const c = closestPointOnSegment(mid, a, b);
+    if (Math.hypot(mid.x - c.x, mid.y - c.y) <= tol) return true;
+  }
+  return false;
+}
+
 // D&D 5e size categories -> grid-square footprint. Small and Medium are
 // mechanically identical (1 square) per the rules — that's not a bug here.
 const DND_SIZES = [
@@ -126,6 +149,8 @@ export function SceneCanvas({
   const [polygonPoints, setPolygonPoints] = useState<Pt[]>([]);
   const [polyCursor, setPolyCursor] = useState<Pt | null>(null);
   const [addingDoor, setAddingDoor] = useState(false);
+  // Fog/door rows this session created, newest last — Ctrl+Z pops and deletes.
+  const fogUndo = useRef<{ kind: "polygon" | "door"; id: string }[]>([]);
 
   const [aoeMenu, setAoeMenu] = useState(false);
   const [aoeMode, setAoeMode] = useState<
@@ -150,7 +175,41 @@ export function SceneCanvas({
     setAddingDoor(false);
     setAoeMode(null);
     setAoe(null);
+    fogUndo.current = [];
   }, [scene.id]);
+
+  // Ctrl/Cmd-Z: while drawing, drop the last point; otherwise undo the last
+  // fog polygon or door this session added.
+  useEffect(() => {
+    if (!isDM) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.shiftKey || !(e.metaKey || e.ctrlKey)) return;
+      if (e.key.toLowerCase() !== "z") return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      if (drawingPolygon && polygonPoints.length > 0) {
+        e.preventDefault();
+        undoPolygonPoint();
+        return;
+      }
+      const last = fogUndo.current.pop();
+      if (!last) return;
+      e.preventDefault();
+      if (last.kind === "polygon") void deletePolygon(last.id);
+      else void deleteDoor(last.id);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // deletePolygon/deleteDoor/undoPolygonPoint are recreated each render but
+    // don't close over anything stale that matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDM, drawingPolygon, polygonPoints.length]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -559,9 +618,11 @@ export function SceneCanvas({
       return;
     }
     room.addFogPolygonLocal(data);
+    fogUndo.current.push({ kind: "polygon", id: data.id });
   }
 
   async function deletePolygon(id: string) {
+    fogUndo.current = fogUndo.current.filter((e) => e.id !== id);
     room.removeFogPolygonLocal(id);
     const { error } = await room.supabase.from("fog_polygons").delete().eq("id", id);
     if (error) toast.error(error.message);
@@ -619,6 +680,7 @@ export function SceneCanvas({
       return;
     }
     room.addFogDoorLocal(data);
+    fogUndo.current.push({ kind: "door", id: data.id });
     setAddingDoor(false);
   }
 
@@ -632,12 +694,24 @@ export function SceneCanvas({
   }
 
   async function deleteDoor(id: string) {
+    fogUndo.current = fogUndo.current.filter((e) => e.id !== id);
     const { error } = await room.supabase.from("fog_doors").delete().eq("id", id);
     if (error) toast.error(error.message);
     room.reloadScene();
   }
 
   const selectedToken = room.tokens.find((t) => t.id === selectedId) ?? null;
+
+  // A hidden room drops its fog once any door on its wall is opened.
+  const polygonRevealed = useCallback(
+    (points: [number, number][]) => {
+      const tol = Math.max(4, scene.grid_size * 0.3);
+      return room.fogDoors.some(
+        (d) => d.is_open && doorOnPolygon(d, points, tol),
+      );
+    },
+    [room.fogDoors, scene.grid_size],
+  );
 
   const inCombat = scene.mode === "combat";
   const combatantByToken = useMemo(() => {
@@ -761,29 +835,23 @@ export function SceneCanvas({
         </Layer>
 
         {scene.fog_enabled && (
-          <Layer>
-            {/* Solid fog rect with each revealed room polygon punched out as
-                a transparent hole (canvas destination-out compositing) —
-                freeform room shapes instead of a blocky per-cell mask. */}
-            <Rect
-              x={0}
-              y={0}
-              width={bounds.w}
-              height={bounds.h}
-              fill={scene.fog_color}
-              opacity={isDM ? scene.fog_dm_opacity : 1}
-              listening={false}
-            />
-            {room.fogPolygons.map((p) => (
-              <Line
-                key={p.id}
-                points={p.points.flat()}
-                closed
-                fill="black"
-                globalCompositeOperation="destination-out"
-                listening={false}
-              />
-            ))}
+          <Layer listening={false}>
+            {/* Region fog: the map stays visible, and each "room" polygon
+                fills its OWN interior with fog to hide it. A polygon whose
+                wall has an open door drops out (revealed). Players see solid
+                fog; the DM sees it at fog_dm_opacity. */}
+            {room.fogPolygons.map((p) =>
+              polygonRevealed(p.points) ? null : (
+                <Line
+                  key={p.id}
+                  points={p.points.flat()}
+                  closed
+                  fill={scene.fog_color}
+                  opacity={isDM ? scene.fog_dm_opacity : 1}
+                  listening={false}
+                />
+              ),
+            )}
           </Layer>
         )}
 
@@ -794,6 +862,8 @@ export function SceneCanvas({
                 p.points.reduce((s, pt) => s + pt[0], 0) / p.points.length;
               const cy =
                 p.points.reduce((s, pt) => s + pt[1], 0) / p.points.length;
+              const revealed = polygonRevealed(p.points);
+              const r = 13 / view.scale;
               return (
                 <Group key={p.id}>
                   <Line
@@ -802,16 +872,37 @@ export function SceneCanvas({
                     stroke="#38bdf8"
                     strokeWidth={1.5 / view.scale}
                     dash={[6 / view.scale, 4 / view.scale]}
+                    opacity={revealed ? 0.35 : 1}
                     listening={false}
+                  />
+                  {/* Round hit target so the delete button stays clickable
+                      when zoomed out (the old bare ✕ glyph did not). */}
+                  <Circle
+                    x={cx}
+                    y={cy}
+                    radius={r}
+                    fill="#f87171"
+                    stroke="#450a0a"
+                    strokeWidth={1 / view.scale}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      void deletePolygon(p.id);
+                    }}
+                    onTap={(e) => {
+                      e.cancelBubble = true;
+                      void deletePolygon(p.id);
+                    }}
                   />
                   <Text
                     text="✕"
-                    x={cx - 6}
-                    y={cy - 7}
-                    fontSize={14 / view.scale}
-                    fill="#f87171"
-                    onClick={() => void deletePolygon(p.id)}
-                    onTap={() => void deletePolygon(p.id)}
+                    x={cx - r}
+                    y={cy - r * 0.72}
+                    width={r * 2}
+                    align="center"
+                    fontSize={r * 1.25}
+                    fontStyle="bold"
+                    fill="#450a0a"
+                    listening={false}
                   />
                 </Group>
               );
@@ -1005,7 +1096,7 @@ export function SceneCanvas({
             >
               🌫️{" "}
               {drawingPolygon
-                ? "Drawing room…"
+                ? "Outlining area…"
                 : addingDoor
                   ? "Click an edge…"
                   : "Fog"}
@@ -1023,9 +1114,10 @@ export function SceneCanvas({
                   }}
                   className="block w-full px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
                 >
-                  Draw room
+                  Hide an area
                   <span className="block text-[10px] text-neutral-500">
-                    click points, click the first one to close
+                    outline it — inside becomes fog. Click the first point to
+                    close.
                   </span>
                 </button>
                 <button
@@ -1039,7 +1131,7 @@ export function SceneCanvas({
                 >
                   Add door / window
                   <span className="block text-[10px] text-neutral-500">
-                    click a room&apos;s edge
+                    click a hidden area&apos;s edge — opening it reveals inside
                   </span>
                 </button>
               </div>

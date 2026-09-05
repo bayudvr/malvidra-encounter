@@ -199,6 +199,12 @@ export function SceneSettings({
             />
             Fog of war
           </label>
+          {scene.fog_enabled && (
+            <p className="text-[10px] text-neutral-500">
+              The map stays visible. Use the 🌫️ Fog tool on the map to outline
+              areas to hide; open a door on one to reveal it.
+            </p>
+          )}
 
           {scene.fog_enabled && (
             <>
@@ -230,7 +236,7 @@ export function SceneSettings({
                   className="w-full"
                 />
                 <p className="text-[10px] text-neutral-500">
-                  Players always see hidden cells as fully solid — this only
+                  Players always see hidden areas as fully solid — this only
                   controls how much you can see through them.
                 </p>
               </div>
