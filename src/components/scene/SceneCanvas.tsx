@@ -199,6 +199,22 @@ export function SceneCanvas({
     });
   }
 
+  // Snaps a point to the nearest cell CENTER (same formula a size-1 token's
+  // footprint snaps to) — used by Measure/AOE so they land on the same grid
+  // spots a token would. Fog polygons/doors stay freehand on purpose.
+  const snapToCell = useCallback(
+    (p: Pt): Pt => {
+      if (!scene.snap_to_grid) return p;
+      const g = scene.grid_size;
+      const half = g / 2;
+      return {
+        x: Math.round((p.x - half) / g) * g + half,
+        y: Math.round((p.y - half) / g) * g + half,
+      };
+    },
+    [scene.snap_to_grid, scene.grid_size],
+  );
+
   // Distance in feet — D&D "every square counts the same" (Chebyshev) metric.
   const feetBetween = useCallback(
     (ax: number, ay: number, bx: number, by: number) => {
@@ -294,16 +310,18 @@ export function SceneCanvas({
     }
     if (aoeMode) {
       e.evt.preventDefault();
-      const p = worldPointer(e);
-      if (!p) return;
+      const raw = worldPointer(e);
+      if (!raw) return;
+      const p = snapToCell(raw);
       aoeDrawing.current = true;
       setAoe({ originX: p.x, originY: p.y, x: p.x, y: p.y });
       return;
     }
     if (measuring) {
       e.evt.preventDefault();
-      const p = worldPointer(e);
-      if (!p) return;
+      const raw = worldPointer(e);
+      if (!raw) return;
+      const p = snapToCell(raw);
       measureDrawing.current = true;
       setRuler({ startX: p.x, startY: p.y, x: p.x, y: p.y });
       return;
@@ -322,13 +340,19 @@ export function SceneCanvas({
       return;
     }
     if (aoeMode && aoeDrawing.current) {
-      const p = worldPointer(e);
-      if (p) setAoe((a) => (a ? { ...a, x: p.x, y: p.y } : a));
+      const raw = worldPointer(e);
+      if (raw) {
+        const p = snapToCell(raw);
+        setAoe((a) => (a ? { ...a, x: p.x, y: p.y } : a));
+      }
       return;
     }
     if (!measuring || !measureDrawing.current) return;
-    const p = worldPointer(e);
-    if (p) setRuler((r) => (r ? { ...r, x: p.x, y: p.y } : r));
+    const raw = worldPointer(e);
+    if (raw) {
+      const p = snapToCell(raw);
+      setRuler((r) => (r ? { ...r, x: p.x, y: p.y } : r));
+    }
   }
 
   function stagePointerUp() {
