@@ -148,20 +148,43 @@ function AssetRow({
   const [name, setName] = useState(asset.name);
   const [imageUrl, setImageUrl] = useState(asset.image_url ?? "");
 
+  // Drag the portrait onto the map to place a token where the cursor lands.
+  const dragProps = {
+    draggable: canDrop,
+    title: canDrop ? "Drag onto the map" : undefined,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData(
+        "application/x-mv-asset",
+        JSON.stringify({
+          assetId: asset.id,
+          label: asset.name,
+          imageUrl: asset.image_url,
+        }),
+      );
+      e.dataTransfer.effectAllowed = "copy";
+    },
+  };
+
   return (
     <li className="space-y-1 rounded px-1 py-1 text-sm hover:bg-neutral-800/50">
       <div className="flex items-center gap-2">
         {asset.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
+            {...dragProps}
             src={asset.image_url}
             alt=""
-            className="h-7 w-7 shrink-0 rounded-full object-cover"
+            className={`h-7 w-7 shrink-0 rounded-full object-cover ${
+              canDrop ? "cursor-grab active:cursor-grabbing" : ""
+            }`}
           />
         ) : (
           <span
+            {...dragProps}
             style={{ background: colorFromString(asset.name) }}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-neutral-950"
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-neutral-950 ${
+              canDrop ? "cursor-grab active:cursor-grabbing" : ""
+            }`}
           >
             {tokenInitials(asset.name)}
           </span>

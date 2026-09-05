@@ -464,6 +464,46 @@ export function SceneCanvas({
     });
   }
 
+  // Drop target for a token portrait dragged out of the library panel. The
+  // token lands where the cursor is, snapped like any other token.
+  async function handleAssetDrop(e: React.DragEvent) {
+    e.preventDefault();
+    if (!isDM) return;
+    const raw = e.dataTransfer.getData("application/x-mv-asset");
+    if (!raw) return;
+    let payload: { assetId: string; label: string; imageUrl: string | null };
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const world = snapToCell({
+      x: (e.clientX - rect.left - view.x) / view.scale,
+      y: (e.clientY - rect.top - view.y) / view.scale,
+    });
+    const { data, error } = await room.supabase
+      .from("tokens")
+      .insert({
+        scene_id: scene.id,
+        room_id: room.room!.id,
+        asset_id: payload.assetId,
+        label: payload.label,
+        image_url: payload.imageUrl,
+        x: world.x,
+        y: world.y,
+      })
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error(error?.message ?? "Couldn't add token");
+      return;
+    }
+    room.addTokenLocal(data);
+    setSelectedId(data.id);
+  }
+
   function handleTokenDragStart(
     t: Token,
     e: Konva.KonvaEventObject<DragEvent>,
@@ -605,7 +645,17 @@ export function SceneCanvas({
   }, [room.combatants]);
 
   return (
-    <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
+    <div
+      ref={wrapRef}
+      className="relative h-full w-full overflow-hidden"
+      onDragOver={(e) => {
+        if (isDM && e.dataTransfer.types.includes("application/x-mv-asset")) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }
+      }}
+      onDrop={handleAssetDrop}
+    >
       <Stage
         ref={stageRef}
         width={size.w}
