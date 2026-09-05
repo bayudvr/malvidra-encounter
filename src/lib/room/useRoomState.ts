@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   Asset,
   Combatant,
-  FogCell,
+  FogPolygon,
   FogDoor,
   Member,
   Role,
@@ -22,7 +22,7 @@ type State = {
   assets: Asset[];
   tokens: Token[];
   combatants: Combatant[];
-  fogCells: FogCell[];
+  fogPolygons: FogPolygon[];
   fogDoors: FogDoor[];
   loading: boolean;
 };
@@ -34,7 +34,7 @@ const EMPTY: State = {
   assets: [],
   tokens: [],
   combatants: [],
-  fogCells: [],
+  fogPolygons: [],
   fogDoors: [],
   loading: true,
 };
@@ -110,12 +110,12 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
           ...prev,
           tokens: [],
           combatants: [],
-          fogCells: [],
+          fogPolygons: [],
           fogDoors: [],
         }));
         return;
       }
-      const [tokens, combatants, fogCells, fogDoors] = await Promise.all([
+      const [tokens, combatants, fogPolygons, fogDoors] = await Promise.all([
         supabase
           .from("tokens")
           .select("*")
@@ -127,7 +127,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
           .eq("scene_id", sceneId)
           .order("sort_order", { ascending: true })
           .order("created_at", { ascending: true }),
-        supabase.from("fog_cells").select("*").eq("scene_id", sceneId),
+        supabase.from("fog_polygons").select("*").eq("scene_id", sceneId),
         supabase.from("fog_doors").select("*").eq("scene_id", sceneId),
       ]);
       // Ignore if the active scene changed while we were loading.
@@ -136,7 +136,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
         ...prev,
         tokens: tokens.data ?? [],
         combatants: combatants.data ?? [],
-        fogCells: fogCells.data ?? [],
+        fogPolygons: fogPolygons.data ?? [],
         fogDoors: fogDoors.data ?? [],
       }));
     },
@@ -290,7 +290,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
         {
           event: "*",
           schema: "public",
-          table: "fog_cells",
+          table: "fog_polygons",
           filter: `room_id=eq.${roomId}`,
         },
         (payload) => {
@@ -299,17 +299,19 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
             if (payload.eventType === "DELETE") {
               return {
                 ...prev,
-                fogCells: prev.fogCells.filter(
-                  (c) => c.id !== (payload.old as { id: string }).id,
+                fogPolygons: prev.fogPolygons.filter(
+                  (p) => p.id !== (payload.old as { id: string }).id,
                 ),
               };
             }
-            const row = payload.new as FogCell;
+            const row = payload.new as FogPolygon;
             if (row.scene_id !== sceneId) return prev;
-            const exists = prev.fogCells.some((c) => c.id === row.id);
+            const exists = prev.fogPolygons.some((p) => p.id === row.id);
             return {
               ...prev,
-              fogCells: exists ? prev.fogCells : [...prev.fogCells, row],
+              fogPolygons: exists
+                ? prev.fogPolygons
+                : [...prev.fogPolygons, row],
             };
           });
         },
@@ -374,22 +376,20 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     );
   }, []);
 
-  // Optimistic local fog-cell reveal/hide (click-to-paint should feel instant
-  // rather than waiting on the realtime round-trip).
-  const addFogCellLocal = useCallback((cell: FogCell) => {
+  // Optimistic local polygon add/remove (drawing/deleting a room shape
+  // should feel instant rather than waiting on the realtime round-trip).
+  const addFogPolygonLocal = useCallback((polygon: FogPolygon) => {
     setState((prev) =>
-      prev.fogCells.some((c) => c.id === cell.id)
+      prev.fogPolygons.some((p) => p.id === polygon.id)
         ? prev
-        : { ...prev, fogCells: [...prev.fogCells, cell] },
+        : { ...prev, fogPolygons: [...prev.fogPolygons, polygon] },
     );
   }, []);
 
-  const removeFogCellLocal = useCallback((cellX: number, cellY: number) => {
+  const removeFogPolygonLocal = useCallback((id: string) => {
     setState((prev) => ({
       ...prev,
-      fogCells: prev.fogCells.filter(
-        (c) => !(c.cell_x === cellX && c.cell_y === cellY),
-      ),
+      fogPolygons: prev.fogPolygons.filter((p) => p.id !== id),
     }));
   }, []);
 
@@ -422,8 +422,8 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     reloadScene: () => loadSceneBits(activeSceneRef.current),
     patchTokenLocal,
     addTokenLocal,
-    addFogCellLocal,
-    removeFogCellLocal,
+    addFogPolygonLocal,
+    removeFogPolygonLocal,
     patchFogDoorLocal,
     addFogDoorLocal,
   };

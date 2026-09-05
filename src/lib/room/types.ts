@@ -6,7 +6,7 @@ export type Token = Tables<"tokens">;
 export type Asset = Tables<"assets">;
 export type Combatant = Tables<"combatants">;
 export type RoomWebhook = Tables<"room_webhooks">;
-export type FogCell = Tables<"fog_cells">;
+export type FogPolygon = Tables<"fog_polygons">;
 export type FogDoor = Tables<"fog_doors">;
 
 export type SceneUpdate = Database["public"]["Tables"]["scenes"]["Update"];

@@ -284,20 +284,18 @@ export interface Database {
         };
         Relationships: [];
       };
-      fog_cells: {
+      fog_polygons: {
         Row: {
           id: string;
           scene_id: string;
           room_id: string;
-          cell_x: number;
-          cell_y: number;
+          points: [number, number][];
         } & Timestamps;
         Insert: {
           id?: string;
           scene_id: string;
           room_id: string;
-          cell_x: number;
-          cell_y: number;
+          points: [number, number][];
           created_at?: string;
         };
         Update: Record<string, never>;
@@ -308,31 +306,24 @@ export interface Database {
           id: string;
           scene_id: string;
           room_id: string;
-          label: string | null;
-          x: number;
-          y: number;
-          width: number;
-          height: number;
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
           is_open: boolean;
         } & Timestamps;
         Insert: {
           id?: string;
           scene_id: string;
           room_id: string;
-          label?: string | null;
-          x: number;
-          y: number;
-          width: number;
-          height: number;
+          x1: number;
+          y1: number;
+          x2: number;
+          y2: number;
           is_open?: boolean;
           created_at?: string;
         };
         Update: {
-          label?: string | null;
-          x?: number;
-          y?: number;
-          width?: number;
-          height?: number;
           is_open?: boolean;
         };
         Relationships: [];

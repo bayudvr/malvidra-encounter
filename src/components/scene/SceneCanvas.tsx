@@ -55,6 +55,35 @@ function nextDuplicateLabel(sourceLabel: string, tokens: Token[]): string {
   return `${base} ${max + 1}`;
 }
 
+type Pt = { x: number; y: number };
+
+function cross(o: Pt, a: Pt, b: Pt) {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+// Do segments p1-p2 and p3-p4 cross? (proper-intersection test; touching
+// endpoints/collinear overlap are edge cases this ignores — fine for
+// "did the token's drag path cross this door" purposes.)
+function segmentsIntersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt) {
+  const d1 = cross(p3, p4, p1);
+  const d2 = cross(p3, p4, p2);
+  const d3 = cross(p1, p2, p3);
+  const d4 = cross(p1, p2, p4);
+  return (
+    ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+    ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  );
+}
+
+function closestPointOnSegment(p: Pt, a: Pt, b: Pt) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  let t = len2 === 0 ? 0 : ((p.x - a.x) * abx + (p.y - a.y) * aby) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * abx, y: a.y + t * aby, t };
+}
+
 // D&D 5e size categories -> grid-square footprint. Small and Medium are
 // mechanically identical (1 square) per the rules — that's not a bug here.
 const DND_SIZES = [
@@ -93,29 +122,19 @@ export function SceneCanvas({
   const didPinch = useRef(false);
 
   const [fogMenu, setFogMenu] = useState(false);
-  const [fogPaintMode, setFogPaintMode] = useState<"reveal" | "hide" | null>(
-    null,
-  );
+  const [drawingPolygon, setDrawingPolygon] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState<Pt[]>([]);
+  const [polyCursor, setPolyCursor] = useState<Pt | null>(null);
   const [addingDoor, setAddingDoor] = useState(false);
-  const [doorDraft, setDoorDraft] = useState<{
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  } | null>(null);
-  const fogPainting = useRef(false);
-  const paintedCells = useRef<Set<string>>(new Set());
-  const doorDrawing = useRef(false);
-  const doorStart = useRef<{ x: number; y: number } | null>(null);
 
   const [mapImage] = useImage(scene.map_url);
 
   // Reset selection and any in-progress map tool when scene changes
   useEffect(() => {
     setSelectedId(null);
-    setFogPaintMode(null);
+    setDrawingPolygon(false);
+    setPolygonPoints([]);
     setAddingDoor(false);
-    setDoorDraft(null);
   }, [scene.id]);
 
   useEffect(() => {
@@ -225,33 +244,21 @@ export function SceneCanvas({
     });
   }
 
-  function cellAt(p: { x: number; y: number }) {
-    const g = scene.grid_size;
-    return { cx: Math.floor(p.x / g), cy: Math.floor(p.y / g) };
-  }
-
   function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       lastPinch.current = null;
       return;
     }
-    if (fogPaintMode) {
+    if (drawingPolygon) {
       e.evt.preventDefault();
       const p = worldPointer(e);
-      if (!p) return;
-      fogPainting.current = true;
-      paintedCells.current = new Set();
-      const { cx, cy } = cellAt(p);
-      applyFogPaint(cx, cy, fogPaintMode);
+      if (p) addPolygonPoint(p);
       return;
     }
     if (addingDoor) {
       e.evt.preventDefault();
       const p = worldPointer(e);
-      if (!p) return;
-      doorDrawing.current = true;
-      doorStart.current = p;
-      setDoorDraft({ x: p.x, y: p.y, w: 0, h: 0 });
+      if (p) placeDoorNear(p);
       return;
     }
     if (measuring) {
@@ -270,26 +277,9 @@ export function SceneCanvas({
       pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
       return;
     }
-    if (fogPaintMode && fogPainting.current) {
+    if (drawingPolygon) {
       const p = worldPointer(e);
-      if (p) {
-        const { cx, cy } = cellAt(p);
-        applyFogPaint(cx, cy, fogPaintMode);
-      }
-      return;
-    }
-    if (addingDoor && doorDrawing.current && doorStart.current) {
-      const p = worldPointer(e);
-      if (p) {
-        const sx = doorStart.current.x;
-        const sy = doorStart.current.y;
-        setDoorDraft({
-          x: Math.min(sx, p.x),
-          y: Math.min(sy, p.y),
-          w: Math.abs(p.x - sx),
-          h: Math.abs(p.y - sy),
-        });
-      }
+      if (p) setPolyCursor(p);
       return;
     }
     if (!measuring || !measureDrawing.current) return;
@@ -298,19 +288,6 @@ export function SceneCanvas({
   }
 
   function stagePointerUp() {
-    if (fogPaintMode) {
-      fogPainting.current = false;
-      paintedCells.current = new Set();
-      return;
-    }
-    if (addingDoor) {
-      doorDrawing.current = false;
-      const d = doorDraft;
-      setDoorDraft(null);
-      if (d && d.w > 6 && d.h > 6) void createDoor(d);
-      setAddingDoor(false);
-      return;
-    }
     // The ruler only lives during the interaction — clear it on release.
     measureDrawing.current = false;
     lastPinch.current = null;
@@ -330,18 +307,43 @@ export function SceneCanvas({
     });
   }
 
+  // A closed door physically blocks a token from being dragged across it —
+  // checked against the straight line from its old to its new position.
+  function crossesClosedDoor(a: Pt, b: Pt) {
+    return room.fogDoors.some(
+      (d) =>
+        !d.is_open &&
+        segmentsIntersect(a, b, { x: d.x1, y: d.y1 }, { x: d.x2, y: d.y2 }),
+    );
+  }
+
   async function moveToken(id: string, rawX: number, rawY: number) {
+    const before = room.tokens.find((t) => t.id === id);
     let x = rawX;
     let y = rawY;
     if (scene.snap_to_grid) {
       const g = scene.grid_size;
-      const size = room.tokens.find((t) => t.id === id)?.size ?? 1;
+      const size = before?.size ?? 1;
       const half = (size * g) / 2;
       // Snap the token's footprint (not its center point) to the grid, so
       // it sits centered inside its cell(s) with grid lines forming a clean
       // border around it, instead of a line cutting through its middle.
       x = Math.round((rawX - half) / g) * g + half;
       y = Math.round((rawY - half) / g) * g + half;
+    }
+    // Check against the raw (pre-snap) drop point, not the grid-snapped one —
+    // snapping can land the token's final resting spot on the far side of a
+    // door whose freehand position doesn't line up with a grid intersection,
+    // which would let a blocked drag sneak through undetected.
+    if (
+      before &&
+      crossesClosedDoor({ x: before.x, y: before.y }, { x: rawX, y: rawY })
+    ) {
+      // Snap it back — the visual drag already moved it, so without this
+      // patch it'd stay wherever the drag dropped it.
+      room.patchTokenLocal(id, { x: before.x, y: before.y });
+      toast.error("Blocked by a closed door");
+      return;
     }
     room.patchTokenLocal(id, { x, y });
     const { error } = await room.supabase
@@ -400,78 +402,100 @@ export function SceneCanvas({
     setRuler({ startX: t.x, startY: t.y, x: t.x, y: t.y });
   }
 
-  const revealedCells = useMemo(() => {
-    const s = new Set<string>();
-    for (const c of room.fogCells) s.add(`${c.cell_x},${c.cell_y}`);
-    return s;
-  }, [room.fogCells]);
+  // Adds a vertex, or — once there are >=3 and the click lands back near the
+  // first one — closes and saves the room shape.
+  function addPolygonPoint(p: Pt) {
+    if (polygonPoints.length >= 3) {
+      const first = polygonPoints[0];
+      const closeThreshold = 16 / view.scale;
+      if (Math.hypot(p.x - first.x, p.y - first.y) <= closeThreshold) {
+        void finishPolygon();
+        return;
+      }
+    }
+    setPolygonPoints((pts) => [...pts, p]);
+  }
 
-  const cellOpenedByDoor = useCallback(
-    (cx: number, cy: number) => {
-      const g = scene.grid_size;
-      const px = cx * g + g / 2;
-      const py = cy * g + g / 2;
-      return room.fogDoors.some(
-        (d) =>
-          d.is_open &&
-          px >= d.x &&
-          px <= d.x + d.width &&
-          py >= d.y &&
-          py <= d.y + d.height,
-      );
-    },
-    [room.fogDoors, scene.grid_size],
-  );
+  function undoPolygonPoint() {
+    setPolygonPoints((pts) => pts.slice(0, -1));
+  }
 
-  async function revealCell(cx: number, cy: number) {
-    if (revealedCells.has(`${cx},${cy}`)) return;
-    // Optimistic add under a client-side id — the later realtime INSERT
-    // carries the real row too, but a harmless duplicate coordinate pair
-    // doesn't affect the revealed-cells Set used for rendering.
-    room.addFogCellLocal({
-      id: crypto.randomUUID(),
-      scene_id: scene.id,
-      room_id: scene.room_id,
-      cell_x: cx,
-      cell_y: cy,
-      created_at: new Date().toISOString(),
+  function cancelPolygon() {
+    setDrawingPolygon(false);
+    setPolygonPoints([]);
+  }
+
+  async function finishPolygon() {
+    if (polygonPoints.length < 3) {
+      toast.error("Need at least 3 points to close a room");
+      return;
+    }
+    const points: [number, number][] = polygonPoints.map((p) => [p.x, p.y]);
+    setPolygonPoints([]);
+    setDrawingPolygon(false);
+    const { data, error } = await room.supabase
+      .from("fog_polygons")
+      .insert({ scene_id: scene.id, room_id: scene.room_id, points })
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error(error?.message ?? "Couldn't add room");
+      return;
+    }
+    room.addFogPolygonLocal(data);
+  }
+
+  async function deletePolygon(id: string) {
+    room.removeFogPolygonLocal(id);
+    const { error } = await room.supabase.from("fog_polygons").delete().eq("id", id);
+    if (error) toast.error(error.message);
+  }
+
+  // Finds the nearest edge (across every room polygon) to the click and
+  // drops a fixed-width door segment centered on that edge there.
+  function placeDoorNear(p: Pt) {
+    let best: { dist: number; a: Pt; b: Pt } | null = null;
+    for (const poly of room.fogPolygons) {
+      const pts = poly.points;
+      for (let i = 0; i < pts.length; i++) {
+        const a = { x: pts[i][0], y: pts[i][1] };
+        const b = { x: pts[(i + 1) % pts.length][0], y: pts[(i + 1) % pts.length][1] };
+        const c = closestPointOnSegment(p, a, b);
+        const dist = Math.hypot(p.x - c.x, p.y - c.y);
+        if (!best || dist < best.dist) best = { dist, a, b };
+      }
+    }
+    const threshold = 20 / view.scale;
+    if (!best || best.dist > threshold) {
+      toast.error("Click closer to a room's edge to place a door");
+      return;
+    }
+    const { a, b } = best;
+    const edgeLen = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const dirX = (b.x - a.x) / edgeLen;
+    const dirY = (b.y - a.y) / edgeLen;
+    const c = closestPointOnSegment(p, a, b);
+    const tCenter = Math.hypot(c.x - a.x, c.y - a.y);
+    const half = Math.min(edgeLen, scene.grid_size * 0.8) / 2;
+    const start = Math.max(0, tCenter - half);
+    const end = Math.min(edgeLen, tCenter + half);
+    void createDoor({
+      x1: a.x + dirX * start,
+      y1: a.y + dirY * start,
+      x2: a.x + dirX * end,
+      y2: a.y + dirY * end,
     });
-    const { error } = await room.supabase
-      .from("fog_cells")
-      .insert({ scene_id: scene.id, room_id: scene.room_id, cell_x: cx, cell_y: cy });
-    if (error) toast.error(error.message);
   }
 
-  async function hideCell(cx: number, cy: number) {
-    room.removeFogCellLocal(cx, cy);
-    const { error } = await room.supabase
-      .from("fog_cells")
-      .delete()
-      .eq("scene_id", scene.id)
-      .eq("cell_x", cx)
-      .eq("cell_y", cy);
-    if (error) toast.error(error.message);
-  }
-
-  function applyFogPaint(cx: number, cy: number, action: "reveal" | "hide") {
-    const key = `${cx},${cy}`;
-    if (paintedCells.current.has(key)) return;
-    paintedCells.current.add(key);
-    if (action === "reveal") void revealCell(cx, cy);
-    else void hideCell(cx, cy);
-  }
-
-  async function createDoor(rect: { x: number; y: number; w: number; h: number }) {
+  async function createDoor(seg: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  }) {
     const { data, error } = await room.supabase
       .from("fog_doors")
-      .insert({
-        scene_id: scene.id,
-        room_id: scene.room_id,
-        x: rect.x,
-        y: rect.y,
-        width: rect.w,
-        height: rect.h,
-      })
+      .insert({ scene_id: scene.id, room_id: scene.room_id, ...seg })
       .select()
       .single();
     if (error || !data) {
@@ -479,6 +503,7 @@ export function SceneCanvas({
       return;
     }
     room.addFogDoorLocal(data);
+    setAddingDoor(false);
   }
 
   async function toggleDoor(door: FogDoor) {
@@ -511,7 +536,7 @@ export function SceneCanvas({
         ref={stageRef}
         width={size.w}
         height={size.h}
-        draggable={!measuring && !fogPaintMode && !addingDoor}
+        draggable={!measuring && !drawingPolygon && !addingDoor}
         x={view.x}
         y={view.y}
         scaleX={view.scale}
@@ -535,7 +560,7 @@ export function SceneCanvas({
         onTouchMove={stagePointerMove}
         onTouchEnd={stagePointerUp}
         style={
-          measuring || fogPaintMode || addingDoor
+          measuring || drawingPolygon || addingDoor
             ? { cursor: "crosshair" }
             : undefined
         }
@@ -577,14 +602,20 @@ export function SceneCanvas({
                   token={t}
                   gridSize={scene.grid_size}
                   draggable={
-                    (isDM || owned) && !measuring && !fogPaintMode && !addingDoor
+                    (isDM || owned) &&
+                    !measuring &&
+                    !drawingPolygon &&
+                    !addingDoor
                   }
                   owned={owned}
                   selected={t.id === selectedId}
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
                   onSelect={() =>
-                    isDM && !fogPaintMode && !addingDoor && setSelectedId(t.id)
+                    isDM &&
+                    !drawingPolygon &&
+                    !addingDoor &&
+                    setSelectedId(t.id)
                   }
                   onDragStart={(e) => handleTokenDragStart(t, e)}
                   onDragMove={(x, y) =>
@@ -602,66 +633,78 @@ export function SceneCanvas({
         </Layer>
 
         {scene.fog_enabled && (
-          <Layer listening={false}>
-            {Array.from({ length: Math.ceil(bounds.h / scene.grid_size) }).map(
-              (_, cy) =>
-                Array.from({
-                  length: Math.ceil(bounds.w / scene.grid_size),
-                }).map((_, cx) => {
-                  if (
-                    revealedCells.has(`${cx},${cy}`) ||
-                    cellOpenedByDoor(cx, cy)
-                  ) {
-                    return null;
-                  }
-                  return (
-                    <Rect
-                      key={`${cx}-${cy}`}
-                      x={cx * scene.grid_size}
-                      y={cy * scene.grid_size}
-                      width={scene.grid_size}
-                      height={scene.grid_size}
-                      fill={scene.fog_color}
-                      opacity={isDM ? scene.fog_dm_opacity : 1}
-                    />
-                  );
-                }),
-            )}
+          <Layer>
+            {/* Solid fog rect with each revealed room polygon punched out as
+                a transparent hole (canvas destination-out compositing) —
+                freeform room shapes instead of a blocky per-cell mask. */}
+            <Rect
+              x={0}
+              y={0}
+              width={bounds.w}
+              height={bounds.h}
+              fill={scene.fog_color}
+              opacity={isDM ? scene.fog_dm_opacity : 1}
+              listening={false}
+            />
+            {room.fogPolygons.map((p) => (
+              <Line
+                key={p.id}
+                points={p.points.flat()}
+                closed
+                fill="black"
+                globalCompositeOperation="destination-out"
+                listening={false}
+              />
+            ))}
           </Layer>
         )}
 
         {isDM && scene.fog_enabled && (
           <Layer>
+            {room.fogPolygons.map((p) => {
+              const cx =
+                p.points.reduce((s, pt) => s + pt[0], 0) / p.points.length;
+              const cy =
+                p.points.reduce((s, pt) => s + pt[1], 0) / p.points.length;
+              return (
+                <Group key={p.id}>
+                  <Line
+                    points={p.points.flat()}
+                    closed
+                    stroke="#38bdf8"
+                    strokeWidth={1.5 / view.scale}
+                    dash={[6 / view.scale, 4 / view.scale]}
+                    listening={false}
+                  />
+                  <Text
+                    text="✕"
+                    x={cx - 6}
+                    y={cy - 7}
+                    fontSize={14 / view.scale}
+                    fill="#f87171"
+                    onClick={() => void deletePolygon(p.id)}
+                    onTap={() => void deletePolygon(p.id)}
+                  />
+                </Group>
+              );
+            })}
+
             {room.fogDoors.map((d) => (
-              <Group key={d.id} x={d.x} y={d.y}>
-                <Rect
-                  width={d.width}
-                  height={d.height}
+              <Group key={d.id}>
+                <Line
+                  points={[d.x1, d.y1, d.x2, d.y2]}
                   stroke={d.is_open ? "#4ade80" : "#f87171"}
-                  strokeWidth={2 / view.scale}
-                  dash={[8 / view.scale, 5 / view.scale]}
-                  fill={
-                    d.is_open ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)"
-                  }
+                  strokeWidth={6 / view.scale}
+                  lineCap="round"
+                  hitStrokeWidth={16 / view.scale}
                   onClick={() => void toggleDoor(d)}
                   onTap={() => void toggleDoor(d)}
                 />
                 <Text
-                  text={d.is_open ? "Open" : "Closed"}
-                  x={0}
-                  y={d.height / 2 - 7}
-                  width={d.width}
-                  align="center"
-                  fontSize={13}
-                  fontStyle="bold"
-                  fill={d.is_open ? "#4ade80" : "#f87171"}
-                  listening={false}
-                />
-                <Text
                   text="✕"
-                  x={d.width - 16}
-                  y={2}
-                  fontSize={13}
+                  x={(d.x1 + d.x2) / 2 - 6}
+                  y={(d.y1 + d.y2) / 2 - 22 / view.scale}
+                  fontSize={12 / view.scale}
                   fill="#f87171"
                   onClick={(e) => {
                     e.cancelBubble = true;
@@ -674,18 +717,30 @@ export function SceneCanvas({
                 />
               </Group>
             ))}
-            {doorDraft && (
-              <Rect
-                x={doorDraft.x}
-                y={doorDraft.y}
-                width={doorDraft.w}
-                height={doorDraft.h}
+
+            {drawingPolygon && polygonPoints.length > 0 && (
+              <Line
+                points={[
+                  ...polygonPoints.flatMap((p) => [p.x, p.y]),
+                  ...(polyCursor ? [polyCursor.x, polyCursor.y] : []),
+                ]}
                 stroke="#f59e0b"
                 strokeWidth={2 / view.scale}
                 dash={[8 / view.scale, 5 / view.scale]}
                 listening={false}
               />
             )}
+            {drawingPolygon &&
+              polygonPoints.map((p, i) => (
+                <Circle
+                  key={i}
+                  x={p.x}
+                  y={p.y}
+                  radius={4 / view.scale}
+                  fill="#f59e0b"
+                  listening={false}
+                />
+              ))}
           </Layer>
         )}
 
@@ -766,7 +821,7 @@ export function SceneCanvas({
                   setRuler(null);
                   setMeasuring(true);
                   setMeasureMenu(false);
-                  setFogPaintMode(null);
+                  cancelPolygon();
                   setAddingDoor(false);
                 }}
                 className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
@@ -799,19 +854,17 @@ export function SceneCanvas({
                 exitMeasure();
               }}
               className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
-                fogPaintMode || addingDoor
+                drawingPolygon || addingDoor
                   ? "border-amber-400 bg-amber-400/20 text-amber-200"
                   : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
               }`}
             >
               🌫️{" "}
-              {fogPaintMode === "reveal"
-                ? "Revealing…"
-                : fogPaintMode === "hide"
-                  ? "Hiding…"
-                  : addingDoor
-                    ? "Drawing door…"
-                    : "Fog"}
+              {drawingPolygon
+                ? "Drawing room…"
+                : addingDoor
+                  ? "Click an edge…"
+                  : "Fog"}
             </button>
 
             {fogMenu && (
@@ -819,59 +872,63 @@ export function SceneCanvas({
                 <button
                   type="button"
                   onClick={() => {
-                    setFogPaintMode("reveal");
+                    setDrawingPolygon(true);
+                    setPolygonPoints([]);
                     setAddingDoor(false);
                     setFogMenu(false);
                   }}
                   className="block w-full px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
                 >
-                  Reveal cells
+                  Draw room
                   <span className="block text-[10px] text-neutral-500">
-                    click or drag over the map
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFogPaintMode("hide");
-                    setAddingDoor(false);
-                    setFogMenu(false);
-                  }}
-                  className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
-                >
-                  Hide cells
-                  <span className="block text-[10px] text-neutral-500">
-                    click or drag to re-cover
+                    click points, click the first one to close
                   </span>
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setAddingDoor(true);
-                    setFogPaintMode(null);
+                    cancelPolygon();
                     setFogMenu(false);
                   }}
                   className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
                 >
                   Add door / window
                   <span className="block text-[10px] text-neutral-500">
-                    drag a rectangle over an opening
+                    click a room&apos;s edge
                   </span>
                 </button>
               </div>
             )}
 
-            {(fogPaintMode || addingDoor) && (
+            {drawingPolygon && polygonPoints.length > 0 && (
+              <button
+                type="button"
+                onClick={undoPolygonPoint}
+                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                Undo point
+              </button>
+            )}
+            {drawingPolygon && polygonPoints.length >= 3 && (
+              <button
+                type="button"
+                onClick={() => void finishPolygon()}
+                className="rounded-md border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-600/30"
+              >
+                Finish
+              </button>
+            )}
+            {(drawingPolygon || addingDoor) && (
               <button
                 type="button"
                 onClick={() => {
-                  setFogPaintMode(null);
+                  cancelPolygon();
                   setAddingDoor(false);
-                  setDoorDraft(null);
                 }}
                 className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
               >
-                Done
+                {drawingPolygon ? "Cancel" : "Done"}
               </button>
             )}
           </div>
