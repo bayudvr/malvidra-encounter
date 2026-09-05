@@ -161,7 +161,7 @@ export function RoomView({
               ✕
             </button>
           </div>
-          <SceneList room={room} />
+          {isDM && <SceneList room={room} />}
           {isDM && scene && <SceneSettings room={room} scene={scene} />}
           {isDM && <AssetPanel room={room} />}
           {isDM && <RoomWebhookPanel room={room} />}
