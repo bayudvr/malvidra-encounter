@@ -97,6 +97,9 @@ export interface Database {
           active_combatant_id: string | null;
           spotlight_user_id: string | null;
           spotlight_note: string | null;
+          fog_enabled: boolean;
+          fog_color: string;
+          fog_dm_opacity: number;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -116,6 +119,9 @@ export interface Database {
           active_combatant_id?: string | null;
           spotlight_user_id?: string | null;
           spotlight_note?: string | null;
+          fog_enabled?: boolean;
+          fog_color?: string;
+          fog_dm_opacity?: number;
           created_at?: string;
         };
         Update: {
@@ -130,6 +136,9 @@ export interface Database {
           grid_thickness?: number;
           spotlight_user_id?: string | null;
           spotlight_note?: string | null;
+          fog_enabled?: boolean;
+          fog_color?: string;
+          fog_dm_opacity?: number;
           feet_per_square?: number;
           position?: number;
           round?: number;
@@ -272,6 +281,59 @@ export interface Database {
           ac?: number | null;
           conditions?: string[];
           token_id?: string | null;
+        };
+        Relationships: [];
+      };
+      fog_cells: {
+        Row: {
+          id: string;
+          scene_id: string;
+          room_id: string;
+          cell_x: number;
+          cell_y: number;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          scene_id: string;
+          room_id: string;
+          cell_x: number;
+          cell_y: number;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      fog_doors: {
+        Row: {
+          id: string;
+          scene_id: string;
+          room_id: string;
+          label: string | null;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          is_open: boolean;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          scene_id: string;
+          room_id: string;
+          label?: string | null;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          is_open?: boolean;
+          created_at?: string;
+        };
+        Update: {
+          label?: string | null;
+          x?: number;
+          y?: number;
+          width?: number;
+          height?: number;
+          is_open?: boolean;
         };
         Relationships: [];
       };

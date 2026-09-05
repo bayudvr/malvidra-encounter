@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import type {
   Asset,
   Combatant,
+  FogCell,
+  FogDoor,
   Member,
   Role,
   Room,
@@ -20,6 +22,8 @@ type State = {
   assets: Asset[];
   tokens: Token[];
   combatants: Combatant[];
+  fogCells: FogCell[];
+  fogDoors: FogDoor[];
   loading: boolean;
 };
 
@@ -30,6 +34,8 @@ const EMPTY: State = {
   assets: [],
   tokens: [],
   combatants: [],
+  fogCells: [],
+  fogDoors: [],
   loading: true,
 };
 
@@ -100,10 +106,16 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
   const loadSceneBits = useCallback(
     async (sceneId: string | null) => {
       if (!sceneId) {
-        setState((prev) => ({ ...prev, tokens: [], combatants: [] }));
+        setState((prev) => ({
+          ...prev,
+          tokens: [],
+          combatants: [],
+          fogCells: [],
+          fogDoors: [],
+        }));
         return;
       }
-      const [tokens, combatants] = await Promise.all([
+      const [tokens, combatants, fogCells, fogDoors] = await Promise.all([
         supabase
           .from("tokens")
           .select("*")
@@ -115,6 +127,8 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
           .eq("scene_id", sceneId)
           .order("sort_order", { ascending: true })
           .order("created_at", { ascending: true }),
+        supabase.from("fog_cells").select("*").eq("scene_id", sceneId),
+        supabase.from("fog_doors").select("*").eq("scene_id", sceneId),
       ]);
       // Ignore if the active scene changed while we were loading.
       if (activeSceneRef.current !== sceneId) return;
@@ -122,6 +136,8 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
         ...prev,
         tokens: tokens.data ?? [],
         combatants: combatants.data ?? [],
+        fogCells: fogCells.data ?? [],
+        fogDoors: fogDoors.data ?? [],
       }));
     },
     [supabase],
@@ -269,6 +285,66 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
           });
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "fog_cells",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          setState((prev) => {
+            const sceneId = activeSceneRef.current;
+            if (payload.eventType === "DELETE") {
+              return {
+                ...prev,
+                fogCells: prev.fogCells.filter(
+                  (c) => c.id !== (payload.old as { id: string }).id,
+                ),
+              };
+            }
+            const row = payload.new as FogCell;
+            if (row.scene_id !== sceneId) return prev;
+            const exists = prev.fogCells.some((c) => c.id === row.id);
+            return {
+              ...prev,
+              fogCells: exists ? prev.fogCells : [...prev.fogCells, row],
+            };
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "fog_doors",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          setState((prev) => {
+            const sceneId = activeSceneRef.current;
+            if (payload.eventType === "DELETE") {
+              return {
+                ...prev,
+                fogDoors: prev.fogDoors.filter(
+                  (d) => d.id !== (payload.old as { id: string }).id,
+                ),
+              };
+            }
+            const row = payload.new as FogDoor;
+            if (row.scene_id !== sceneId) return prev;
+            const exists = prev.fogDoors.some((d) => d.id === row.id);
+            return {
+              ...prev,
+              fogDoors: exists
+                ? prev.fogDoors.map((d) => (d.id === row.id ? row : d))
+                : [...prev.fogDoors, row],
+            };
+          });
+        },
+      )
       .subscribe();
 
     return () => {
@@ -298,6 +374,40 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     );
   }, []);
 
+  // Optimistic local fog-cell reveal/hide (click-to-paint should feel instant
+  // rather than waiting on the realtime round-trip).
+  const addFogCellLocal = useCallback((cell: FogCell) => {
+    setState((prev) =>
+      prev.fogCells.some((c) => c.id === cell.id)
+        ? prev
+        : { ...prev, fogCells: [...prev.fogCells, cell] },
+    );
+  }, []);
+
+  const removeFogCellLocal = useCallback((cellX: number, cellY: number) => {
+    setState((prev) => ({
+      ...prev,
+      fogCells: prev.fogCells.filter(
+        (c) => !(c.cell_x === cellX && c.cell_y === cellY),
+      ),
+    }));
+  }, []);
+
+  const patchFogDoorLocal = useCallback((id: string, patch: Partial<FogDoor>) => {
+    setState((prev) => ({
+      ...prev,
+      fogDoors: prev.fogDoors.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+    }));
+  }, []);
+
+  const addFogDoorLocal = useCallback((door: FogDoor) => {
+    setState((prev) =>
+      prev.fogDoors.some((d) => d.id === door.id)
+        ? prev
+        : { ...prev, fogDoors: [...prev.fogDoors, door] },
+    );
+  }, []);
+
   return {
     ...state,
     supabase,
@@ -312,6 +422,10 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     reloadScene: () => loadSceneBits(activeSceneRef.current),
     patchTokenLocal,
     addTokenLocal,
+    addFogCellLocal,
+    removeFogCellLocal,
+    patchFogDoorLocal,
+    addFogDoorLocal,
   };
 }
 

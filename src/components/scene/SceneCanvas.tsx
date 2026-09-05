@@ -16,7 +16,13 @@ import type Konva from "konva";
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
-import type { Combatant, Scene, Token, TokenUpdate } from "@/lib/room/types";
+import type {
+  Combatant,
+  FogDoor,
+  Scene,
+  Token,
+  TokenUpdate,
+} from "@/lib/room/types";
 import { TokenSprite } from "@/components/scene/TokenSprite";
 
 const MIN_SCALE = 0.15;
@@ -86,10 +92,31 @@ export function SceneCanvas({
   const lastPinch = useRef<{ dist: number; cx: number; cy: number } | null>(null);
   const didPinch = useRef(false);
 
+  const [fogMenu, setFogMenu] = useState(false);
+  const [fogPaintMode, setFogPaintMode] = useState<"reveal" | "hide" | null>(
+    null,
+  );
+  const [addingDoor, setAddingDoor] = useState(false);
+  const [doorDraft, setDoorDraft] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null>(null);
+  const fogPainting = useRef(false);
+  const paintedCells = useRef<Set<string>>(new Set());
+  const doorDrawing = useRef(false);
+  const doorStart = useRef<{ x: number; y: number } | null>(null);
+
   const [mapImage] = useImage(scene.map_url);
 
-  // Reset selection when scene changes
-  useEffect(() => setSelectedId(null), [scene.id]);
+  // Reset selection and any in-progress map tool when scene changes
+  useEffect(() => {
+    setSelectedId(null);
+    setFogPaintMode(null);
+    setAddingDoor(false);
+    setDoorDraft(null);
+  }, [scene.id]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -198,9 +225,33 @@ export function SceneCanvas({
     });
   }
 
+  function cellAt(p: { x: number; y: number }) {
+    const g = scene.grid_size;
+    return { cx: Math.floor(p.x / g), cy: Math.floor(p.y / g) };
+  }
+
   function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       lastPinch.current = null;
+      return;
+    }
+    if (fogPaintMode) {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (!p) return;
+      fogPainting.current = true;
+      paintedCells.current = new Set();
+      const { cx, cy } = cellAt(p);
+      applyFogPaint(cx, cy, fogPaintMode);
+      return;
+    }
+    if (addingDoor) {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (!p) return;
+      doorDrawing.current = true;
+      doorStart.current = p;
+      setDoorDraft({ x: p.x, y: p.y, w: 0, h: 0 });
       return;
     }
     if (measuring) {
@@ -219,12 +270,47 @@ export function SceneCanvas({
       pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
       return;
     }
+    if (fogPaintMode && fogPainting.current) {
+      const p = worldPointer(e);
+      if (p) {
+        const { cx, cy } = cellAt(p);
+        applyFogPaint(cx, cy, fogPaintMode);
+      }
+      return;
+    }
+    if (addingDoor && doorDrawing.current && doorStart.current) {
+      const p = worldPointer(e);
+      if (p) {
+        const sx = doorStart.current.x;
+        const sy = doorStart.current.y;
+        setDoorDraft({
+          x: Math.min(sx, p.x),
+          y: Math.min(sy, p.y),
+          w: Math.abs(p.x - sx),
+          h: Math.abs(p.y - sy),
+        });
+      }
+      return;
+    }
     if (!measuring || !measureDrawing.current) return;
     const p = worldPointer(e);
     if (p) setRuler((r) => (r ? { ...r, x: p.x, y: p.y } : r));
   }
 
   function stagePointerUp() {
+    if (fogPaintMode) {
+      fogPainting.current = false;
+      paintedCells.current = new Set();
+      return;
+    }
+    if (addingDoor) {
+      doorDrawing.current = false;
+      const d = doorDraft;
+      setDoorDraft(null);
+      if (d && d.w > 6 && d.h > 6) void createDoor(d);
+      setAddingDoor(false);
+      return;
+    }
     // The ruler only lives during the interaction — clear it on release.
     measureDrawing.current = false;
     lastPinch.current = null;
@@ -314,6 +400,102 @@ export function SceneCanvas({
     setRuler({ startX: t.x, startY: t.y, x: t.x, y: t.y });
   }
 
+  const revealedCells = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of room.fogCells) s.add(`${c.cell_x},${c.cell_y}`);
+    return s;
+  }, [room.fogCells]);
+
+  const cellOpenedByDoor = useCallback(
+    (cx: number, cy: number) => {
+      const g = scene.grid_size;
+      const px = cx * g + g / 2;
+      const py = cy * g + g / 2;
+      return room.fogDoors.some(
+        (d) =>
+          d.is_open &&
+          px >= d.x &&
+          px <= d.x + d.width &&
+          py >= d.y &&
+          py <= d.y + d.height,
+      );
+    },
+    [room.fogDoors, scene.grid_size],
+  );
+
+  async function revealCell(cx: number, cy: number) {
+    if (revealedCells.has(`${cx},${cy}`)) return;
+    // Optimistic add under a client-side id — the later realtime INSERT
+    // carries the real row too, but a harmless duplicate coordinate pair
+    // doesn't affect the revealed-cells Set used for rendering.
+    room.addFogCellLocal({
+      id: crypto.randomUUID(),
+      scene_id: scene.id,
+      room_id: scene.room_id,
+      cell_x: cx,
+      cell_y: cy,
+      created_at: new Date().toISOString(),
+    });
+    const { error } = await room.supabase
+      .from("fog_cells")
+      .insert({ scene_id: scene.id, room_id: scene.room_id, cell_x: cx, cell_y: cy });
+    if (error) toast.error(error.message);
+  }
+
+  async function hideCell(cx: number, cy: number) {
+    room.removeFogCellLocal(cx, cy);
+    const { error } = await room.supabase
+      .from("fog_cells")
+      .delete()
+      .eq("scene_id", scene.id)
+      .eq("cell_x", cx)
+      .eq("cell_y", cy);
+    if (error) toast.error(error.message);
+  }
+
+  function applyFogPaint(cx: number, cy: number, action: "reveal" | "hide") {
+    const key = `${cx},${cy}`;
+    if (paintedCells.current.has(key)) return;
+    paintedCells.current.add(key);
+    if (action === "reveal") void revealCell(cx, cy);
+    else void hideCell(cx, cy);
+  }
+
+  async function createDoor(rect: { x: number; y: number; w: number; h: number }) {
+    const { data, error } = await room.supabase
+      .from("fog_doors")
+      .insert({
+        scene_id: scene.id,
+        room_id: scene.room_id,
+        x: rect.x,
+        y: rect.y,
+        width: rect.w,
+        height: rect.h,
+      })
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error(error?.message ?? "Couldn't add door");
+      return;
+    }
+    room.addFogDoorLocal(data);
+  }
+
+  async function toggleDoor(door: FogDoor) {
+    room.patchFogDoorLocal(door.id, { is_open: !door.is_open });
+    const { error } = await room.supabase
+      .from("fog_doors")
+      .update({ is_open: !door.is_open })
+      .eq("id", door.id);
+    if (error) toast.error(error.message);
+  }
+
+  async function deleteDoor(id: string) {
+    const { error } = await room.supabase.from("fog_doors").delete().eq("id", id);
+    if (error) toast.error(error.message);
+    room.reloadScene();
+  }
+
   const selectedToken = room.tokens.find((t) => t.id === selectedId) ?? null;
 
   const inCombat = scene.mode === "combat";
@@ -329,7 +511,7 @@ export function SceneCanvas({
         ref={stageRef}
         width={size.w}
         height={size.h}
-        draggable={!measuring}
+        draggable={!measuring && !fogPaintMode && !addingDoor}
         x={view.x}
         y={view.y}
         scaleX={view.scale}
@@ -352,7 +534,11 @@ export function SceneCanvas({
         onTouchStart={stagePointerDown}
         onTouchMove={stagePointerMove}
         onTouchEnd={stagePointerUp}
-        style={measuring ? { cursor: "crosshair" } : undefined}
+        style={
+          measuring || fogPaintMode || addingDoor
+            ? { cursor: "crosshair" }
+            : undefined
+        }
       >
         <Layer listening={false}>
           {mapImage && (
@@ -390,12 +576,16 @@ export function SceneCanvas({
                   key={t.id}
                   token={t}
                   gridSize={scene.grid_size}
-                  draggable={(isDM || owned) && !measuring}
+                  draggable={
+                    (isDM || owned) && !measuring && !fogPaintMode && !addingDoor
+                  }
                   owned={owned}
                   selected={t.id === selectedId}
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
-                  onSelect={() => isDM && setSelectedId(t.id)}
+                  onSelect={() =>
+                    isDM && !fogPaintMode && !addingDoor && setSelectedId(t.id)
+                  }
                   onDragStart={(e) => handleTokenDragStart(t, e)}
                   onDragMove={(x, y) =>
                     setRuler((r) => (r ? { ...r, x, y } : r))
@@ -410,6 +600,94 @@ export function SceneCanvas({
           {/* ping marker at origin for orientation */}
           <Circle x={0} y={0} radius={3} fill="#f59e0b" listening={false} />
         </Layer>
+
+        {scene.fog_enabled && (
+          <Layer listening={false}>
+            {Array.from({ length: Math.ceil(bounds.h / scene.grid_size) }).map(
+              (_, cy) =>
+                Array.from({
+                  length: Math.ceil(bounds.w / scene.grid_size),
+                }).map((_, cx) => {
+                  if (
+                    revealedCells.has(`${cx},${cy}`) ||
+                    cellOpenedByDoor(cx, cy)
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <Rect
+                      key={`${cx}-${cy}`}
+                      x={cx * scene.grid_size}
+                      y={cy * scene.grid_size}
+                      width={scene.grid_size}
+                      height={scene.grid_size}
+                      fill={scene.fog_color}
+                      opacity={isDM ? scene.fog_dm_opacity : 1}
+                    />
+                  );
+                }),
+            )}
+          </Layer>
+        )}
+
+        {isDM && scene.fog_enabled && (
+          <Layer>
+            {room.fogDoors.map((d) => (
+              <Group key={d.id} x={d.x} y={d.y}>
+                <Rect
+                  width={d.width}
+                  height={d.height}
+                  stroke={d.is_open ? "#4ade80" : "#f87171"}
+                  strokeWidth={2 / view.scale}
+                  dash={[8 / view.scale, 5 / view.scale]}
+                  fill={
+                    d.is_open ? "rgba(74,222,128,0.1)" : "rgba(248,113,113,0.1)"
+                  }
+                  onClick={() => void toggleDoor(d)}
+                  onTap={() => void toggleDoor(d)}
+                />
+                <Text
+                  text={d.is_open ? "Open" : "Closed"}
+                  x={0}
+                  y={d.height / 2 - 7}
+                  width={d.width}
+                  align="center"
+                  fontSize={13}
+                  fontStyle="bold"
+                  fill={d.is_open ? "#4ade80" : "#f87171"}
+                  listening={false}
+                />
+                <Text
+                  text="✕"
+                  x={d.width - 16}
+                  y={2}
+                  fontSize={13}
+                  fill="#f87171"
+                  onClick={(e) => {
+                    e.cancelBubble = true;
+                    void deleteDoor(d.id);
+                  }}
+                  onTap={(e) => {
+                    e.cancelBubble = true;
+                    void deleteDoor(d.id);
+                  }}
+                />
+              </Group>
+            ))}
+            {doorDraft && (
+              <Rect
+                x={doorDraft.x}
+                y={doorDraft.y}
+                width={doorDraft.w}
+                height={doorDraft.h}
+                stroke="#f59e0b"
+                strokeWidth={2 / view.scale}
+                dash={[8 / view.scale, 5 / view.scale]}
+                listening={false}
+              />
+            )}
+          </Layer>
+        )}
 
         {ruler && (
           <Layer listening={false}>
@@ -488,6 +766,8 @@ export function SceneCanvas({
                   setRuler(null);
                   setMeasuring(true);
                   setMeasureMenu(false);
+                  setFogPaintMode(null);
+                  setAddingDoor(false);
                 }}
                 className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
               >
@@ -508,6 +788,93 @@ export function SceneCanvas({
           >
             Done
           </button>
+        )}
+
+        {isDM && scene.fog_enabled && (
+          <div className="relative flex items-end gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setFogMenu((o) => !o);
+                exitMeasure();
+              }}
+              className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+                fogPaintMode || addingDoor
+                  ? "border-amber-400 bg-amber-400/20 text-amber-200"
+                  : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+              }`}
+            >
+              🌫️{" "}
+              {fogPaintMode === "reveal"
+                ? "Revealing…"
+                : fogPaintMode === "hide"
+                  ? "Hiding…"
+                  : addingDoor
+                    ? "Drawing door…"
+                    : "Fog"}
+            </button>
+
+            {fogMenu && (
+              <div className="absolute bottom-full left-0 mb-1 w-48 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFogPaintMode("reveal");
+                    setAddingDoor(false);
+                    setFogMenu(false);
+                  }}
+                  className="block w-full px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
+                >
+                  Reveal cells
+                  <span className="block text-[10px] text-neutral-500">
+                    click or drag over the map
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFogPaintMode("hide");
+                    setAddingDoor(false);
+                    setFogMenu(false);
+                  }}
+                  className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
+                >
+                  Hide cells
+                  <span className="block text-[10px] text-neutral-500">
+                    click or drag to re-cover
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingDoor(true);
+                    setFogPaintMode(null);
+                    setFogMenu(false);
+                  }}
+                  className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
+                >
+                  Add door / window
+                  <span className="block text-[10px] text-neutral-500">
+                    drag a rectangle over an opening
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {(fogPaintMode || addingDoor) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFogPaintMode(null);
+                  setAddingDoor(false);
+                  setDoorDraft(null);
+                }}
+                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                Done
+              </button>
+            )}
+          </div>
         )}
 
         <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200">

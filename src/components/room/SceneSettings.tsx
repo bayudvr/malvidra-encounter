@@ -190,6 +190,54 @@ export function SceneSettings({
           />
         </div>
 
+        <div className="space-y-3 border-t border-neutral-800 pt-3">
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input
+              type="checkbox"
+              checked={scene.fog_enabled}
+              onChange={(e) => update({ fog_enabled: e.target.checked })}
+            />
+            Fog of war
+          </label>
+
+          {scene.fog_enabled && (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="fogColor">Fog color</Label>
+                <input
+                  id="fogColor"
+                  type="color"
+                  value={scene.fog_color}
+                  onChange={(e) => update({ fog_color: e.target.value })}
+                  className="h-7 w-10 cursor-pointer rounded border border-neutral-700 bg-neutral-950"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="fogDmOpacity">
+                  Fog opacity for you ({Math.round(scene.fog_dm_opacity * 100)}%)
+                </Label>
+                <input
+                  id="fogDmOpacity"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={scene.fog_dm_opacity}
+                  onChange={(e) =>
+                    update({ fog_dm_opacity: Number(e.target.value) })
+                  }
+                  className="w-full"
+                />
+                <p className="text-[10px] text-neutral-500">
+                  Players always see hidden cells as fully solid — this only
+                  controls how much you can see through them.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+
         <div className="space-y-2 border-t border-neutral-800 pt-3">
           <Label htmlFor="spotlightUser">
             Spotlight (waiting on) — shown to everyone, outside combat too

@@ -6,6 +6,8 @@ export type Token = Tables<"tokens">;
 export type Asset = Tables<"assets">;
 export type Combatant = Tables<"combatants">;
 export type RoomWebhook = Tables<"room_webhooks">;
+export type FogCell = Tables<"fog_cells">;
+export type FogDoor = Tables<"fog_doors">;
 
 export type SceneUpdate = Database["public"]["Tables"]["scenes"]["Update"];
 export type TokenUpdate = Database["public"]["Tables"]["tokens"]["Update"];
@@ -13,6 +15,7 @@ export type CombatantUpdate =
   Database["public"]["Tables"]["combatants"]["Update"];
 export type RoomWebhookUpdate =
   Database["public"]["Tables"]["room_webhooks"]["Update"];
+export type FogDoorUpdate = Database["public"]["Tables"]["fog_doors"]["Update"];
 
 export type Member = {
   id: string;
