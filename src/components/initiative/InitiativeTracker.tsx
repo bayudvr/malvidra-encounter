@@ -352,6 +352,24 @@ function CombatantRow({
   );
 }
 
+// Resolves what a committed field value means: a leading "+" or "-" is a
+// relative adjustment off the current value ("+5" heals 5, "-3" deals 3), so
+// the DM can do HP/THP/MHP math in place; a bare number sets it outright.
+function resolveNumberInput(
+  current: number | null,
+  raw: string,
+): number | null {
+  const s = raw.trim();
+  if (s === "") return null;
+  const rel = s.match(/^([+-])\s*(\d+(?:\.\d+)?)$/);
+  if (rel) {
+    const delta = Number(rel[2]) * (rel[1] === "-" ? -1 : 1);
+    return (current ?? 0) + delta;
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : current;
+}
+
 function NumberCell({
   value,
   onCommit,
@@ -370,14 +388,30 @@ function NumberCell({
     setDraft(value?.toString() ?? "");
   }
 
+  function commit() {
+    const next = resolveNumberInput(value, draft);
+    if (next !== value) onCommit(next);
+    // Snap the field back to the resolved absolute value ("+5" -> "23").
+    setDraft(next?.toString() ?? "");
+  }
+
   return (
     <input
-      type="number"
+      type="text"
+      inputMode="numeric"
       value={draft}
+      title="Type +N or -N to add or subtract"
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => {
-        const next = draft === "" ? null : Number(draft);
-        if (next !== value) onCommit(next);
+      onFocus={(e) => e.target.select()}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        } else if (e.key === "Escape") {
+          setDraft(value?.toString() ?? "");
+          e.currentTarget.blur();
+        }
       }}
       className={`${width} rounded bg-neutral-800 px-1 py-0.5 text-center text-neutral-100`}
       placeholder="–"

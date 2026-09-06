@@ -39,7 +39,7 @@ export function TokenSprite({
   onDragStart?: (e: Konva.KonvaEventObject<DragEvent>) => void;
   onDragMove?: (x: number, y: number) => void;
   onDragEnd: (x: number, y: number) => void;
-  onSelect: () => void;
+  onSelect: (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
 }) {
   const [image] = useImage(token.image_url);
   const radius = (token.size * gridSize) / 2;

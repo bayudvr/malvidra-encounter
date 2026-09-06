@@ -131,7 +131,26 @@ export function SceneCanvas({
   const stageRef = useRef<Konva.Stage>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ scale: 0.6, x: 40, y: 40 });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Token selection is a set — one token shows the inspector, several show the
+  // bulk-action bar and drag/hide together. DM only.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Shift held: suppresses stage panning so a shift-drag on empty map draws a
+  // marquee instead. Reset on blur so it can't get stuck.
+  const [shiftHeld, setShiftHeld] = useState(false);
+  const [marquee, setMarquee] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const marqueeDrawing = useRef(false);
+  // Set on drag-start when the grabbed token is part of a multi-selection —
+  // every selected token then moves by the same delta.
+  const multiDragRef = useRef<{
+    anchorId: string;
+    anchorStart: Pt;
+    positions: Map<string, { x: number; y: number; size: number }>;
+  } | null>(null);
   const [ruler, setRuler] = useState<{
     startX: number;
     startY: number;
@@ -169,7 +188,7 @@ export function SceneCanvas({
 
   // Reset selection and any in-progress map tool when scene changes
   useEffect(() => {
-    setSelectedId(null);
+    setSelectedIds([]);
     setDrawingPolygon(false);
     setPolygonPoints([]);
     setAddingDoor(false);
@@ -210,6 +229,29 @@ export function SceneCanvas({
     // don't close over anything stale that matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDM, drawingPolygon, polygonPoints.length]);
+
+  // Track the Shift key so a shift-drag on empty map draws a selection
+  // marquee rather than panning the stage.
+  useEffect(() => {
+    if (!isDM) return;
+    function onDown(e: KeyboardEvent) {
+      if (e.key === "Shift") setShiftHeld(true);
+    }
+    function onUp(e: KeyboardEvent) {
+      if (e.key === "Shift") setShiftHeld(false);
+    }
+    function onBlur() {
+      setShiftHeld(false);
+    }
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [isDM]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -385,12 +427,27 @@ export function SceneCanvas({
       setRuler({ startX: p.x, startY: p.y, x: p.x, y: p.y });
       return;
     }
-    if (e.target === e.target.getStage()) setSelectedId(null);
+    if (e.target === e.target.getStage()) {
+      if (isDM && shiftHeld) {
+        const p = worldPointer(e);
+        if (p) {
+          marqueeDrawing.current = true;
+          setMarquee({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+        }
+        return;
+      }
+      setSelectedIds([]);
+    }
   }
 
   function stagePointerMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
+      return;
+    }
+    if (marqueeDrawing.current) {
+      const p = worldPointer(e);
+      if (p) setMarquee((m) => (m ? { ...m, x1: p.x, y1: p.y } : m));
       return;
     }
     if (drawingPolygon) {
@@ -415,6 +472,29 @@ export function SceneCanvas({
   }
 
   function stagePointerUp() {
+    if (marqueeDrawing.current) {
+      marqueeDrawing.current = false;
+      if (marquee) {
+        const minX = Math.min(marquee.x0, marquee.x1);
+        const maxX = Math.max(marquee.x0, marquee.x1);
+        const minY = Math.min(marquee.y0, marquee.y1);
+        const maxY = Math.max(marquee.y0, marquee.y1);
+        // A drag of any real size selects every token whose center lands in
+        // the box; a stray click (near-zero box) leaves the selection alone.
+        if (maxX - minX > 3 || maxY - minY > 3) {
+          setSelectedIds(
+            room.tokens
+              .filter(
+                (t) =>
+                  t.x >= minX && t.x <= maxX && t.y >= minY && t.y <= maxY,
+              )
+              .map((t) => t.id),
+          );
+        }
+      }
+      setMarquee(null);
+      return;
+    }
     if (aoeMode) {
       // Non-permanent by design — the shape only lives during the drag.
       aoeDrawing.current = false;
@@ -486,6 +566,44 @@ export function SceneCanvas({
     if (error) toast.error(error.message);
   }
 
+  // Commit a multi-selection drag: every token captured on drag-start moves by
+  // the same (dx, dy), each snapping its own footprint and each checked
+  // against closed doors independently.
+  async function commitMultiMove(dx: number, dy: number) {
+    const origin = multiDragRef.current;
+    multiDragRef.current = null;
+    if (!origin) return;
+    const g = scene.grid_size;
+    const updates: { id: string; x: number; y: number }[] = [];
+    let blocked = false;
+    for (const [id, o] of origin.positions) {
+      const rawX = o.x + dx;
+      const rawY = o.y + dy;
+      if (crossesClosedDoor({ x: o.x, y: o.y }, { x: rawX, y: rawY })) {
+        room.patchTokenLocal(id, { x: o.x, y: o.y });
+        blocked = true;
+        continue;
+      }
+      let x = rawX;
+      let y = rawY;
+      if (scene.snap_to_grid) {
+        const half = (o.size * g) / 2;
+        x = Math.round((rawX - half) / g) * g + half;
+        y = Math.round((rawY - half) / g) * g + half;
+      }
+      room.patchTokenLocal(id, { x, y });
+      updates.push({ id, x, y });
+    }
+    if (blocked) toast.error("Some tokens blocked by a closed door");
+    const results = await Promise.all(
+      updates.map((u) =>
+        room.supabase.from("tokens").update({ x: u.x, y: u.y }).eq("id", u.id),
+      ),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) toast.error(failed.error.message);
+  }
+
   // Alt-drag a token to duplicate it: the original stays put, a new token is
   // inserted at the same spot with an auto-numbered label ("Goblin" ->
   // "Goblin 1", next one "Goblin 2", ...), and the drag carries on with the
@@ -514,7 +632,7 @@ export function SceneCanvas({
       return;
     }
     room.addTokenLocal(data);
-    setSelectedId(data.id);
+    setSelectedIds([data.id]);
     setRuler({ startX: data.x, startY: data.y, x: data.x, y: data.y });
     // The new token's Group hasn't mounted yet this tick — grab it once it
     // has so the drag continues onto it without the user releasing/re-pressing.
@@ -562,7 +680,7 @@ export function SceneCanvas({
       return;
     }
     room.addTokenLocal(data);
-    setSelectedId(data.id);
+    setSelectedIds([data.id]);
   }
 
   function handleTokenDragStart(
@@ -573,6 +691,28 @@ export function SceneCanvas({
       e.target.stopDrag();
       void duplicateToken(t);
       return;
+    }
+    if (isDM && selectedIds.length > 1 && selectedIds.includes(t.id)) {
+      const positions = new Map<
+        string,
+        { x: number; y: number; size: number }
+      >();
+      for (const id of selectedIds) {
+        const tk = room.tokens.find((x) => x.id === id);
+        if (tk) positions.set(id, { x: tk.x, y: tk.y, size: tk.size ?? 1 });
+      }
+      multiDragRef.current = {
+        anchorId: t.id,
+        anchorStart: { x: t.x, y: t.y },
+        positions,
+      };
+    } else {
+      multiDragRef.current = null;
+      // Dragging a token that wasn't part of the selection makes it the
+      // selection (unless Shift is held to extend it).
+      if (isDM && !e.evt?.shiftKey && !selectedIds.includes(t.id)) {
+        setSelectedIds([t.id]);
+      }
     }
     setRuler({ startX: t.x, startY: t.y, x: t.x, y: t.y });
   }
@@ -700,7 +840,22 @@ export function SceneCanvas({
     room.reloadScene();
   }
 
-  const selectedToken = room.tokens.find((t) => t.id === selectedId) ?? null;
+  const selectedToken =
+    selectedIds.length === 1
+      ? (room.tokens.find((t) => t.id === selectedIds[0]) ?? null)
+      : null;
+  const selectedTokens = room.tokens.filter((t) => selectedIds.includes(t.id));
+
+  function toggleTokenSelection(id: string, additive: boolean) {
+    setSelectedIds((prev) => {
+      if (additive) {
+        return prev.includes(id)
+          ? prev.filter((x) => x !== id)
+          : [...prev, id];
+      }
+      return [id];
+    });
+  }
 
   // A hidden room drops its fog once any door on its wall is opened.
   const polygonRevealed = useCallback(
@@ -736,7 +891,14 @@ export function SceneCanvas({
         ref={stageRef}
         width={size.w}
         height={size.h}
-        draggable={!measuring && !drawingPolygon && !addingDoor && !aoeMode}
+        draggable={
+          !measuring &&
+          !drawingPolygon &&
+          !addingDoor &&
+          !aoeMode &&
+          !shiftHeld &&
+          !marquee
+        }
         x={view.x}
         y={view.y}
         scaleX={view.scale}
@@ -809,23 +971,55 @@ export function SceneCanvas({
                     !aoeMode
                   }
                   owned={owned}
-                  selected={t.id === selectedId}
+                  selected={selectedIds.includes(t.id)}
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
-                  onSelect={() =>
-                    isDM &&
-                    !drawingPolygon &&
-                    !addingDoor &&
-                    !aoeMode &&
-                    setSelectedId(t.id)
-                  }
+                  onSelect={(e) => {
+                    if (
+                      !isDM ||
+                      drawingPolygon ||
+                      addingDoor ||
+                      aoeMode
+                    )
+                      return;
+                    const evt = e?.evt as
+                      | MouseEvent
+                      | TouchEvent
+                      | undefined;
+                    const additive = !!(
+                      evt &&
+                      "shiftKey" in evt &&
+                      (evt.shiftKey || evt.metaKey || evt.ctrlKey)
+                    );
+                    toggleTokenSelection(t.id, additive);
+                  }}
                   onDragStart={(e) => handleTokenDragStart(t, e)}
-                  onDragMove={(x, y) =>
-                    setRuler((r) => (r ? { ...r, x, y } : r))
-                  }
+                  onDragMove={(x, y) => {
+                    setRuler((r) => (r ? { ...r, x, y } : r));
+                    const origin = multiDragRef.current;
+                    if (origin && origin.anchorId === t.id) {
+                      const dx = x - origin.anchorStart.x;
+                      const dy = y - origin.anchorStart.y;
+                      for (const [id, o] of origin.positions) {
+                        if (id === origin.anchorId) continue;
+                        room.patchTokenLocal(id, {
+                          x: o.x + dx,
+                          y: o.y + dy,
+                        });
+                      }
+                    }
+                  }}
                   onDragEnd={(x, y) => {
                     setRuler(null);
-                    moveToken(t.id, x, y);
+                    if (
+                      multiDragRef.current &&
+                      multiDragRef.current.anchorId === t.id
+                    ) {
+                      const o = multiDragRef.current.anchorStart;
+                      void commitMultiMove(x - o.x, y - o.y);
+                    } else {
+                      void moveToken(t.id, x, y);
+                    }
                   }}
                 />
               );
@@ -960,6 +1154,21 @@ export function SceneCanvas({
                   listening={false}
                 />
               ))}
+          </Layer>
+        )}
+
+        {marquee && (
+          <Layer listening={false}>
+            <Rect
+              x={Math.min(marquee.x0, marquee.x1)}
+              y={Math.min(marquee.y0, marquee.y1)}
+              width={Math.abs(marquee.x1 - marquee.x0)}
+              height={Math.abs(marquee.y1 - marquee.y0)}
+              fill="rgba(56,189,248,0.12)"
+              stroke="#38bdf8"
+              strokeWidth={1 / view.scale}
+              dash={[4 / view.scale, 3 / view.scale]}
+            />
           </Layer>
         )}
 
@@ -1263,9 +1472,122 @@ export function SceneCanvas({
           key={selectedToken.id}
           room={room}
           token={selectedToken}
-          onClose={() => setSelectedId(null)}
+          onClose={() => setSelectedIds([])}
         />
       )}
+
+      {isDM && selectedTokens.length > 1 && (
+        <MultiTokenBar
+          room={room}
+          tokens={selectedTokens}
+          onClose={() => setSelectedIds([])}
+        />
+      )}
+    </div>
+  );
+}
+
+// Bulk actions for a multi-token selection — drag-together is handled on the
+// canvas; this bar covers hide/reveal, adding everyone to combat, and delete.
+function MultiTokenBar({
+  room,
+  tokens,
+  onClose,
+}: {
+  room: RoomStore;
+  tokens: Token[];
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const ids = tokens.map((t) => t.id);
+  const inCombat = room.activeScene?.mode === "combat";
+  const combatantTokenIds = new Set(
+    room.combatants.map((c) => c.token_id).filter(Boolean) as string[],
+  );
+  const notInCombat = tokens.filter((t) => !combatantTokenIds.has(t.id));
+
+  async function setHidden(is_hidden: boolean) {
+    for (const id of ids) room.patchTokenLocal(id, { is_hidden });
+    const { error } = await room.supabase
+      .from("tokens")
+      .update({ is_hidden })
+      .in("id", ids);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  async function addAllToCombat() {
+    if (notInCombat.length === 0) return;
+    const base = room.combatants.length;
+    const { error } = await room.supabase.from("combatants").insert(
+      notInCombat.map((t, i) => ({
+        scene_id: t.scene_id,
+        room_id: t.room_id,
+        name: t.label,
+        is_player: !!t.owner_user_id,
+        user_id: t.owner_user_id,
+        token_id: t.id,
+        sort_order: base + i,
+      })),
+    );
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  async function removeAll() {
+    if (!confirm(`Remove ${ids.length} tokens from this scene?`)) return;
+    const { error } = await room.supabase.from("tokens").delete().in("id", ids);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+    onClose();
+  }
+
+  return (
+    <div className="absolute right-2 top-2 w-52 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm shadow-xl">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          {ids.length} tokens
+        </span>
+        <button
+          className="text-neutral-500 hover:text-neutral-200"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setHidden(true)}
+            className="flex-1 rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-100 hover:bg-neutral-700"
+          >
+            Hide
+          </button>
+          <button
+            onClick={() => setHidden(false)}
+            className="flex-1 rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-100 hover:bg-neutral-700"
+          >
+            Reveal
+          </button>
+        </div>
+
+        {inCombat && notInCombat.length > 0 && (
+          <button
+            onClick={addAllToCombat}
+            className="w-full rounded bg-emerald-600 px-2 py-1 text-xs text-white hover:bg-emerald-500"
+          >
+            Add {notInCombat.length} to combat
+          </button>
+        )}
+
+        <button
+          onClick={removeAll}
+          className="w-full rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-500"
+        >
+          Remove tokens
+        </button>
+      </div>
     </div>
   );
 }
