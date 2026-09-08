@@ -98,3 +98,15 @@ The checked-in `src/lib/database.types.ts` is hand-written to match the migratio
 
 Deploys to Vercel as-is. Set the three `NEXT_PUBLIC_*` env vars in the Vercel project and
 point `NEXT_PUBLIC_SITE_URL` at the deployed URL.
+
+### Keeping the database awake
+
+Supabase pauses a free-tier project after ~7 days without activity.
+[`.github/workflows/heartbeat.yml`](.github/workflows/heartbeat.yml) runs
+[`scripts/heartbeat.mjs`](scripts/heartbeat.mjs) twice a day (08:00 / 16:00 UTC, plus
+manual **Run workflow**) to fire a tiny `rooms` count query and keep it alive.
+
+Add two repo secrets (**Settings → Secrets and variables → Actions**):
+
+- `SUPABASE_URL` — same as `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY` — the `service_role` key (bypasses RLS; never expose it client-side)
