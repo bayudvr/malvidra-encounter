@@ -13,18 +13,17 @@ if (!supabaseUrl || !supabaseKey) {
   process.exit(1);
 }
 
+console.log(`Pinging ${new URL(supabaseUrl).host} …`);
+
 const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false },
+  auth: { persistSession: false, autoRefreshToken: false },
 });
 
-const { count, error } = await supabase
-  .from("rooms")
-  .select("id", { count: "exact", head: true })
-  .limit(1);
+const { data, error } = await supabase.from("rooms").select("id").limit(1);
 
 if (error) {
-  console.error("Ping failed:", error);
+  console.error("Ping failed:", JSON.stringify(error, null, 2));
   process.exit(1);
 }
 
-console.log("Ping successful:", count);
+console.log(`Ping successful — read ${data.length} row(s).`);
