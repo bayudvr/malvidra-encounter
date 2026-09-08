@@ -72,6 +72,16 @@ Key decisions:
   `spotlight_note`, migration 0010) — shown as a banner in `RoomView.tsx`'s header for
   everyone, and pushed through the Discord webhook (`scene` category) like a turn change.
 - RoomView is responsive: side panels + initiative editor become drawers below `lg`.
+- **"Cast" screen for a projector**: `📺 Cast` button in `RoomView` header (DM-only)
+  opens `/rooms/[roomId]/cast` in a second window. `CastView` runs `useRoomState`
+  with a forced `role: "player"` (fog opaque, `is_hidden` tokens gone, non-PC stats
+  hidden) and `<SceneCanvas castMode>` — all local pan/zoom/drag/toolbars disabled.
+  The viewport *mirrors the DM's*: `SceneCanvas` opens an ephemeral Realtime
+  broadcast channel `cast:<roomId>`, the DM debounce-sends its `view` on change,
+  the cast screen applies it (`cast-hello` on subscribe asks the DM to replay the
+  current viewport). Route is DM-only but the perspective is still forced to player
+  so nothing DM-only can leak. No DiceTray on the cast screen. If the DM's room page
+  isn't open there's no broadcaster and the cast view sits at its default viewport.
 - Kicked players are bounced to `/rooms` live (realtime on `room_members`; needs
   REPLICA IDENTITY FULL — see [Supabase realtime DELETE gotcha](supabase-realtime-delete-gotcha.md)).
 - Client talks to Supabase directly (browser client); RLS is the security boundary.

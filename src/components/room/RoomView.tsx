@@ -95,6 +95,22 @@ export function RoomView({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {isDM && scene && <ModeToggle room={room} scene={scene} />}
+          {isDM && (
+            <button
+              type="button"
+              onClick={() =>
+                window.open(
+                  `/rooms/${roomId}/cast`,
+                  "malvidra-cast",
+                  "noopener",
+                )
+              }
+              title="Open the player-safe view on a projector / second screen"
+              className="hidden rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:inline"
+            >
+              📺 Cast
+            </button>
+          )}
           {!isDM && (
             <span className="hidden text-xs text-sky-300 sm:inline">
               Player view

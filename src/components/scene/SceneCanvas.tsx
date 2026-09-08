@@ -12,6 +12,7 @@ import {
   Text,
 } from "react-konva";
 import type Konva from "konva";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
@@ -121,9 +122,17 @@ const DND_SIZES = [
 export function SceneCanvas({
   room,
   scene,
+  castMode = false,
 }: {
   room: RoomStore;
   scene: Scene;
+  /**
+   * Projector / "Cast" screen: renders the player's perspective (fog opaque,
+   * hidden tokens gone, no DM stats), all local interaction is disabled, and
+   * the viewport mirrors whatever the DM is looking at via a Realtime
+   * broadcast channel instead of panning/zooming on its own.
+   */
+  castMode?: boolean;
 }) {
   const toast = useToast();
   const isDM = room.role === "dm";
@@ -264,6 +273,76 @@ export function SceneCanvas({
     return () => ro.disconnect();
   }, []);
 
+  // --- Cast screen viewport mirroring -------------------------------------
+  // The DM broadcasts its viewport on every pan/zoom; a cast screen applies it
+  // verbatim. Ephemeral broadcast (no DB writes) on a per-room channel.
+  const castChannelRef = useRef<RealtimeChannel | null>(null);
+  const viewRef = useRef(view);
+  const sceneIdRef = useRef(scene.id);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  useEffect(() => {
+    sceneIdRef.current = scene.id;
+  }, [scene.id]);
+
+  useEffect(() => {
+    if (!isDM && !castMode) return;
+    const supabase = room.supabase;
+    const channel = supabase.channel(`cast:${scene.room_id}`, {
+      config: { broadcast: { self: false } },
+    });
+    castChannelRef.current = channel;
+
+    if (castMode) {
+      channel.on("broadcast", { event: "view" }, ({ payload }) => {
+        const p = payload as {
+          sceneId: string;
+          scale: number;
+          x: number;
+          y: number;
+        };
+        if (p.sceneId !== sceneIdRef.current) return;
+        setView({ scale: p.scale, x: p.x, y: p.y });
+      });
+      channel.subscribe((status) => {
+        // Ask the DM to replay its current viewport now that we're listening.
+        if (status === "SUBSCRIBED") {
+          channel.send({ type: "broadcast", event: "cast-hello", payload: {} });
+        }
+      });
+    } else {
+      channel.on("broadcast", { event: "cast-hello" }, () => {
+        channel.send({
+          type: "broadcast",
+          event: "view",
+          payload: { sceneId: sceneIdRef.current, ...viewRef.current },
+        });
+      });
+      channel.subscribe();
+    }
+
+    return () => {
+      castChannelRef.current = null;
+      supabase.removeChannel(channel);
+    };
+  }, [isDM, castMode, room.supabase, scene.room_id]);
+
+  // DM: push the viewport to any cast screen whenever it changes (debounced).
+  useEffect(() => {
+    if (castMode || !isDM) return;
+    const channel = castChannelRef.current;
+    if (!channel) return;
+    const id = setTimeout(() => {
+      channel.send({
+        type: "broadcast",
+        event: "view",
+        payload: { sceneId: scene.id, scale: view.scale, x: view.x, y: view.y },
+      });
+    }, 50);
+    return () => clearTimeout(id);
+  }, [castMode, isDM, view, scene.id]);
+
   const bounds = useMemo(() => {
     if (mapImage) return { w: mapImage.width, h: mapImage.height };
     return { w: scene.grid_size * 30, h: scene.grid_size * 20 };
@@ -279,6 +358,7 @@ export function SceneCanvas({
   }, [scene.grid_enabled, scene.grid_size, bounds]);
 
   function handleWheel(e: Konva.KonvaEventObject<WheelEvent>) {
+    if (castMode) return;
     e.evt.preventDefault();
     const stage = e.target.getStage();
     if (!stage) return;
@@ -393,6 +473,7 @@ export function SceneCanvas({
   }
 
   function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (castMode) return;
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       lastPinch.current = null;
       return;
@@ -441,6 +522,7 @@ export function SceneCanvas({
   }
 
   function stagePointerMove(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
+    if (castMode) return;
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
       return;
@@ -472,6 +554,7 @@ export function SceneCanvas({
   }
 
   function stagePointerUp() {
+    if (castMode) return;
     if (marqueeDrawing.current) {
       marqueeDrawing.current = false;
       if (marquee) {
@@ -892,6 +975,7 @@ export function SceneCanvas({
         width={size.w}
         height={size.h}
         draggable={
+          !castMode &&
           !measuring &&
           !drawingPolygon &&
           !addingDoor &&
@@ -964,6 +1048,7 @@ export function SceneCanvas({
                   token={t}
                   gridSize={scene.grid_size}
                   draggable={
+                    !castMode &&
                     (isDM || owned) &&
                     !measuring &&
                     !drawingPolygon &&
@@ -1228,6 +1313,7 @@ export function SceneCanvas({
         )}
       </Stage>
 
+      {!castMode && (
       <div className="absolute bottom-2 left-2 flex items-end gap-2">
         <div className="relative">
           <button
@@ -1466,6 +1552,7 @@ export function SceneCanvas({
           </button>
         </div>
       </div>
+      )}
 
       {isDM && selectedToken && (
         <TokenInspector
