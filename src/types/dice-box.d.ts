@@ -34,6 +34,9 @@ declare module "@3d-dice/dice-box" {
     clear(): void;
     hide(hideClass?: string): void;
     show(): void;
+    // Swaps theme/themeColor/etc. on an already-initialized box — re-fetches
+    // that theme's assets under the hood, no need to recreate the instance.
+    updateConfig(config: Partial<DiceBoxConfig>): void;
     onRollComplete: (results: DiceResult[]) => void;
   }
 }

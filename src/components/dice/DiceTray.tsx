@@ -11,6 +11,39 @@ import type { DiceDetail } from "@/lib/database.types";
 
 const DICE = [4, 6, 8, 10, 12, 20, 100] as const;
 
+// Every dice-box theme whose diceAvailable includes the full standard D&D
+// polyhedral set (d4/d6/d8/d10/d12/d20/d100) — vendored under
+// public/assets/dice-box/themes/ from github.com/3d-dice/dice-themes.
+// Deliberately excludes genesys (Genesys RPG's own custom dice),
+// diceOfRolling-fate (Fate dice) and smooth-pip (pip-only d6) — none of
+// those roll a d20.
+const THEMES = [
+  { id: "default", label: "Default" },
+  { id: "gemstone", label: "Gemstone" },
+  { id: "gemstoneMarble", label: "Gemstone Marble" },
+  { id: "rust", label: "Rust" },
+  { id: "rock", label: "Rock" },
+  { id: "wooden", label: "Wooden" },
+  { id: "smooth", label: "Smooth" },
+  { id: "diceOfRolling", label: "Dice of Rolling" },
+  { id: "blueGreenMetal", label: "Blue/Green Metal" },
+] as const;
+
+// Purely a local rendering preference (this app's 3D roll animation is
+// already local-only — only the numeric result syncs to other players, see
+// [[dice-roller]]) — no reason for this to live in Supabase.
+const THEME_STORAGE_KEY = "mv-dice-theme";
+
+function loadSavedTheme(): string {
+  if (typeof window === "undefined") return "default";
+  try {
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return saved && THEMES.some((t) => t.id === saved) ? saved : "default";
+  } catch {
+    return "default";
+  }
+}
+
 type RollRow = {
   id: string;
   user_id: string | null;
@@ -80,6 +113,7 @@ export function DiceTray({ room }: { room: RoomStore }) {
   const boxRef = useRef<DiceBox | null>(null);
   const loadingRef = useRef(false);
   const [boxReady, setBoxReady] = useState(false);
+  const [theme, setTheme] = useState(loadSavedTheme);
   const dpRef = useRef<DiceParser | null>(null);
   if (!dpRef.current) dpRef.current = new DiceParser();
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -111,7 +145,11 @@ export function DiceTray({ room }: { room: RoomStore }) {
         assetPath: "/assets/dice-box/",
         scale: 4,
         gravity: 2,
-        theme: "default",
+        // Picks up whatever was saved from a previous session (loadSavedTheme,
+        // read once into state before this effect ever runs) — deliberately
+        // not a dep of this effect (see the `toast` note above); a change
+        // afterward goes through handleThemeChange's updateConfig instead.
+        theme,
         themeColor: "#f59e0b",
       });
       await box.init();
@@ -267,6 +305,19 @@ export function DiceTray({ room }: { room: RoomStore }) {
     }
   }
 
+  function handleThemeChange(next: string) {
+    setTheme(next);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    } catch {
+      // Private browsing / storage disabled — theme just won't persist
+      // across sessions, not worth surfacing to the user.
+    }
+    // Box may not exist yet (tray never opened) — the init effect above
+    // reads the state we just set, so there's nothing else to do then.
+    boxRef.current?.updateConfig({ theme: next });
+  }
+
   function closeTray() {
     setOpen(false);
     clearHideTimer();
@@ -292,14 +343,27 @@ export function DiceTray({ room }: { room: RoomStore }) {
 
       {open && (
         <div className="fixed bottom-20 right-4 z-[62] flex max-h-[70vh] w-[17rem] flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
+            <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-neutral-400">
               Dice roller
             </span>
+            <select
+              value={theme}
+              onChange={(e) => handleThemeChange(e.target.value)}
+              title="Dice skin"
+              aria-label="Dice skin"
+              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-800 px-1 py-0.5 text-[11px] text-neutral-300"
+            >
+              {THEMES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={closeTray}
-              className="text-neutral-500 hover:text-neutral-200"
+              className="shrink-0 text-neutral-500 hover:text-neutral-200"
               aria-label="Close"
             >
               ✕
