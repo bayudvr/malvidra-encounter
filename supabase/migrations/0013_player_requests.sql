@@ -4,7 +4,7 @@
 -- chat feature — these stack (multiple pending at once) until the DM (or
 -- the sender) dismisses each one.
 
-create table public.player_requests (
+create table if not exists public.player_requests (
   id uuid primary key default gen_random_uuid(),
   room_id uuid not null references public.rooms (id) on delete cascade,
   user_id uuid not null references public.profiles (id) on delete cascade,
@@ -16,7 +16,7 @@ alter table public.player_requests enable row level security;
 -- Filtered realtime subscriptions (room_id=eq.<id>) only see DELETEs if the
 -- table is FULL replica identity -- see [[supabase-realtime-delete-gotcha]].
 alter table public.player_requests replica identity full;
-create index player_requests_room_idx on public.player_requests (room_id);
+create index if not exists player_requests_room_idx on public.player_requests (room_id);
 
 drop policy if exists player_requests_select on public.player_requests;
 create policy player_requests_select on public.player_requests

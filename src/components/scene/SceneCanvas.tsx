@@ -707,6 +707,8 @@ export function SceneCanvas({
         color: source.color,
         owner_user_id: source.owner_user_id,
         is_hidden: source.is_hidden,
+        hp: source.hp,
+        ac: source.ac,
       })
       .select()
       .single();
@@ -744,6 +746,10 @@ export function SceneCanvas({
       x: (e.clientX - rect.left - view.x) / view.scale,
       y: (e.clientY - rect.top - view.y) / view.scale,
     });
+    // hp/ac aren't on the drag payload itself (that's set once at dragstart,
+    // before the DM might have tweaked the library entry) — look the asset up
+    // live from room.assets so a dropped token gets its current defaults.
+    const asset = room.assets.find((a) => a.id === payload.assetId);
     const { data, error } = await room.supabase
       .from("tokens")
       .insert({
@@ -755,6 +761,8 @@ export function SceneCanvas({
         x: world.x,
         y: world.y,
         is_hidden: true,
+        hp: asset?.hp,
+        ac: asset?.ac,
       })
       .select()
       .single();
@@ -1827,6 +1835,8 @@ function TokenInspector({
 }) {
   const toast = useToast();
   const [label, setLabel] = useState(token.label);
+  const [hp, setHp] = useState(token.hp);
+  const [ac, setAc] = useState(token.ac);
 
   async function update(patch: TokenUpdate) {
     const { error } = await room.supabase
@@ -1852,6 +1862,11 @@ function TokenInspector({
       user_id: token.owner_user_id,
       token_id: token.id,
       sort_order: room.combatants.length,
+      // token.hp doubles as max_hp — nothing has depleted it yet, same as
+      // seed_scene_combatants (supabase/migrations/0015_token_battle_stats.sql).
+      hp: token.hp,
+      max_hp: token.hp,
+      ac: token.ac,
     });
     if (error) toast.error(error.message);
     else room.reloadScene();
@@ -1903,6 +1918,29 @@ function TokenInspector({
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="mb-2 flex items-center gap-3 text-xs text-neutral-500">
+        <label className="flex items-center gap-1">
+          HP
+          <input
+            type="number"
+            value={hp}
+            onChange={(e) => setHp(Number(e.target.value))}
+            onBlur={() => hp !== token.hp && update({ hp })}
+            className="w-12 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-neutral-200"
+          />
+        </label>
+        <label className="flex items-center gap-1">
+          AC
+          <input
+            type="number"
+            value={ac}
+            onChange={(e) => setAc(Number(e.target.value))}
+            onBlur={() => ac !== token.ac && update({ ac })}
+            className="w-12 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-neutral-200"
+          />
+        </label>
       </div>
 
       <label className="mb-2 flex items-center gap-2 text-xs text-neutral-300">

@@ -167,6 +167,8 @@ export function TokenSprite({
         />
       )}
 
+      {/* Name below the token (not above) so the HP bar/stat line stack
+          directly under it, all in one group below the sprite. */}
       <Text
         text={token.label}
         fontSize={12}
@@ -174,12 +176,12 @@ export function TokenSprite({
         align="center"
         width={160}
         offsetX={80}
-        y={-radius - 16}
+        y={radius + 4}
         listening={false}
       />
 
       {showStats && ratio != null && (
-        <Group y={radius + 4} listening={false}>
+        <Group y={radius + 20} listening={false}>
           <Rect
             x={-radius}
             width={radius * 2}
@@ -208,7 +210,7 @@ export function TokenSprite({
           align="center"
           width={200}
           offsetX={100}
-          y={radius + (ratio != null ? 13 : 4)}
+          y={radius + 20 + (ratio != null ? 9 : 0)}
           listening={false}
         />
       )}

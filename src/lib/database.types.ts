@@ -69,15 +69,24 @@ export interface Database {
           room_id: string;
           name: string;
           image_url: string | null;
+          hp: number;
+          ac: number;
         } & Timestamps;
         Insert: {
           id?: string;
           room_id: string;
           name: string;
           image_url?: string | null;
+          hp?: number;
+          ac?: number;
           created_at?: string;
         };
-        Update: { name?: string; image_url?: string | null };
+        Update: {
+          name?: string;
+          image_url?: string | null;
+          hp?: number;
+          ac?: number;
+        };
         Relationships: [];
       };
       scenes: {
@@ -162,6 +171,8 @@ export interface Database {
           color: string | null;
           owner_user_id: string | null;
           is_hidden: boolean;
+          hp: number;
+          ac: number;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -176,6 +187,8 @@ export interface Database {
           color?: string | null;
           owner_user_id?: string | null;
           is_hidden?: boolean;
+          hp?: number;
+          ac?: number;
           created_at?: string;
         };
         Update: {
@@ -187,6 +200,8 @@ export interface Database {
           color?: string | null;
           owner_user_id?: string | null;
           is_hidden?: boolean;
+          hp?: number;
+          ac?: number;
         };
         Relationships: [];
       };
