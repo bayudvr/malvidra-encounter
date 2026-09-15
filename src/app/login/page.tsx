@@ -1,11 +1,13 @@
 import { Suspense } from "react";
 
 import { LoginForm } from "./LoginForm";
+import { Logo } from "@/components/Logo";
 
 export default function LoginPage() {
   return (
     <main className="flex min-h-full items-center justify-center p-6">
       <div className="w-full max-w-sm">
+        <Logo className="mb-3 h-12 w-12" />
         <h1 className="mb-1 text-2xl font-bold text-amber-400">
           Malvidra Encounter
         </h1>

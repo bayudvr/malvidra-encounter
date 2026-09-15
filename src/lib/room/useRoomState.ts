@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/database.types";
 import type {
   Asset,
   Combatant,
@@ -39,8 +41,36 @@ const EMPTY: State = {
   loading: true,
 };
 
-export function useRoomState(roomId: string, userId: string, role: Role) {
-  const supabase = useMemo(() => createClient(), []);
+type RoomStateOpts = {
+  /**
+   * Supabase client to use instead of the default authed browser client —
+   * e.g. the header-authed cast client for the public `/cast/<token>` screen.
+   */
+  client?: SupabaseClient<Database>;
+  /**
+   * Set `false` to skip Realtime subscriptions and poll instead. The cast
+   * client is anonymous, and `request.headers` (hence the `cast_room_id()`
+   * RLS branch) is not available to Realtime — so postgres_changes would
+   * silently return nothing. Polling is fine for a projector.
+   */
+  realtime?: boolean;
+  /** Poll interval in ms when `realtime` is `false` (default 2500). */
+  pollMs?: number;
+};
+
+export function useRoomState(
+  roomId: string,
+  userId: string,
+  role: Role,
+  opts?: RoomStateOpts,
+) {
+  const client = opts?.client;
+  const realtime = opts?.realtime ?? true;
+  const pollMs = opts?.pollMs ?? 2500;
+  const supabase = useMemo(
+    () => client ?? createClient(),
+    [client],
+  ) as SupabaseClient<Database>;
   const [state, setState] = useState<State>(EMPTY);
   const [previewSceneId, setPreviewSceneId] = useState<string | null>(null);
   const [kicked, setKicked] = useState(false);
@@ -153,8 +183,16 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     loadSceneBits(activeSceneId);
   }, [activeSceneId, loadSceneBits]);
 
-  // Realtime
+  // Realtime — or, for the anonymous cast screen, a plain poll (see RoomStateOpts).
   useEffect(() => {
+    if (!realtime) {
+      const id = setInterval(() => {
+        loadRoomBits();
+        loadSceneBits(activeSceneRef.current);
+      }, pollMs);
+      return () => clearInterval(id);
+    }
+
     const channel = supabase
       .channel(`room:${roomId}`)
       .on(
@@ -199,7 +237,7 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
         async () => {
           loadRoomBits();
           // A player who was just kicked should be bounced out of the room.
-          if (role !== "dm") {
+          if (role !== "dm" && userId) {
             const { data } = await supabase
               .from("room_members")
               .select("id")
@@ -352,7 +390,16 @@ export function useRoomState(roomId: string, userId: string, role: Role) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roomId, supabase, loadRoomBits, role, userId]);
+  }, [
+    roomId,
+    supabase,
+    loadRoomBits,
+    loadSceneBits,
+    role,
+    userId,
+    realtime,
+    pollMs,
+  ]);
 
   const activeScene =
     state.scenes.find((s) => s.id === activeSceneId) ?? null;

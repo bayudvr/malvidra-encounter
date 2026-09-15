@@ -24,6 +24,7 @@ export interface Database {
           name: string;
           dm_id: string;
           invite_code: string;
+          cast_token: string;
           active_scene_id: string | null;
           archived_at: string | null;
         } & Timestamps;
@@ -32,6 +33,7 @@ export interface Database {
           name: string;
           dm_id: string;
           invite_code?: string;
+          cast_token?: string;
           active_scene_id?: string | null;
           archived_at?: string | null;
           created_at?: string;
@@ -353,6 +355,7 @@ export interface Database {
       is_room_member: { Args: { p_room: string }; Returns: boolean };
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
       send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
+      rotate_cast_token: { Args: { p_room: string }; Returns: string };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

@@ -15,6 +15,7 @@ import { AssetPanel } from "@/components/room/AssetPanel";
 import { RoomWebhookPanel } from "@/components/room/RoomWebhookPanel";
 import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
+import { CastControls } from "@/components/room/CastControls";
 import { PlayerRequests } from "@/components/room/PlayerRequests";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
@@ -96,20 +97,10 @@ export function RoomView({
         <div className="flex shrink-0 items-center gap-2">
           {isDM && scene && <ModeToggle room={room} scene={scene} />}
           {isDM && (
-            <button
-              type="button"
-              onClick={() =>
-                window.open(
-                  `/rooms/${roomId}/cast`,
-                  "malvidra-cast",
-                  "noopener",
-                )
-              }
-              title="Open the player-safe view on a projector / second screen"
-              className="hidden rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:inline"
-            >
-              📺 Cast
-            </button>
+            <CastControls
+              roomId={roomId}
+              castToken={room.room?.cast_token}
+            />
           )}
           {!isDM && (
             <span className="hidden text-xs text-sky-300 sm:inline">

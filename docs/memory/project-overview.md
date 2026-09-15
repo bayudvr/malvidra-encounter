@@ -82,6 +82,8 @@ Key decisions:
   current viewport). Route is DM-only but the perspective is still forced to player
   so nothing DM-only can leak. No DiceTray on the cast screen. If the DM's room page
   isn't open there's no broadcaster and the cast view sits at its default viewport.
+  **Also castable straight to a Chromecast** via the Presentation API + a public
+  token route (`/cast/<token>`, `rooms.cast_token`, migration 0014) — see [[casting]].
 - Kicked players are bounced to `/rooms` live (realtime on `room_members`; needs
   REPLICA IDENTITY FULL — see [Supabase realtime DELETE gotcha](supabase-realtime-delete-gotcha.md)).
 - Client talks to Supabase directly (browser client); RLS is the security boundary.

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Malvidra Encounter">
+  <!-- Malvidra mark: an eye whose pupil is a d20, with a 7 on its face. Envy green. -->
+  <defs>
+    <clipPath id="mv-eye">
+      <path d="M2 32 Q32 -5 62 32 Q32 69 2 32 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- sclera: keeps the eye readable on light and dark backgrounds alike -->
+  <path d="M2 32 Q32 -5 62 32 Q32 69 2 32 Z" fill="#0b140f" />
+
+  <!-- d20 pupil, clipped to the lids so it never spills past the eye -->
+  <g clip-path="url(#mv-eye)">
+    <polygon points="32,14 46.72,22.5 46.72,39.5 32,48 17.28,39.5 17.28,22.5" fill="#2f9e5b" />
+    <g stroke="#0b140f" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none">
+      <polygon points="32,14 46.72,39.5 17.28,39.5" />
+      <path d="M17.28 22.5 L32 14 M17.28 22.5 L17.28 39.5 M46.72 22.5 L32 14 M46.72 22.5 L46.72 39.5 M32 48 L17.28 39.5 M32 48 L46.72 39.5" />
+    </g>
+    <text x="32" y="32.5" text-anchor="middle" dominant-baseline="central"
+      font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+      font-size="16" font-weight="700" fill="#f5efe1">7</text>
+  </g>
+
+  <!-- eyelid outline on top -->
+  <path d="M2 32 Q32 -5 62 32 Q32 69 2 32 Z" fill="none" stroke="#2f9e5b" stroke-width="3" stroke-linejoin="round" />
+</svg>

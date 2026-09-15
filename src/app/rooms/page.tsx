@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
 import { Panel } from "@/components/ui";
+import { Logo } from "@/components/Logo";
 import { RoomsActions } from "./RoomsActions";
 import { RoomRow } from "./RoomRow";
 import { SignOutButton } from "./SignOutButton";
@@ -89,11 +90,16 @@ export default async function RoomsPage() {
   return (
     <main className="mx-auto w-full max-w-3xl p-6">
       <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold text-amber-400">Malvidra Encounter</h1>
-          <p className="text-sm text-neutral-400">
-            Signed in as {profile?.display_name ?? user.email}
-          </p>
+        <div className="flex items-center gap-3">
+          <Logo className="h-9 w-9 shrink-0" />
+          <div>
+            <h1 className="text-xl font-bold text-amber-400">
+              Malvidra Encounter
+            </h1>
+            <p className="text-sm text-neutral-400">
+              Signed in as {profile?.display_name ?? user.email}
+            </p>
+          </div>
         </div>
         <SignOutButton />
       </header>

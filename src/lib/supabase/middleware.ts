@@ -3,7 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 
 import type { Database } from "@/lib/database.types";
 
-const PUBLIC_PATHS = ["/login", "/auth", "/join"];
+const PUBLIC_PATHS = ["/login", "/auth", "/join", "/cast"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });

@@ -1,9 +1,12 @@
 "use client";
 
+import { useMemo } from "react";
 import dynamic from "next/dynamic";
 
 import { useRoomState } from "@/lib/room/useRoomState";
+import { createCastClient } from "@/lib/supabase/client";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
+import { Logo } from "@/components/Logo";
 
 const SceneCanvas = dynamic(
   () => import("@/components/scene/SceneCanvas").then((m) => m.SceneCanvas),
@@ -22,20 +25,34 @@ function CastSkeleton() {
  * The "Cast" screen — what the DM drops onto a projector / second display.
  * It renders the room's active scene from the *player's* perspective (fog
  * opaque, hidden tokens gone, monster stats hidden) with every local control
- * stripped out; the viewport mirrors whatever the DM is looking at. Route is
- * DM-only (see the page), but the perspective is forced to "player" here so
- * nothing DM-only can leak onto the projector.
+ * stripped out; the viewport mirrors whatever the DM is looking at.
+ *
+ * The authed route (`/rooms/<id>/cast`) is DM-only; the public
+ * `/cast/<token>` route passes `castToken` and runs anonymously (header auth,
+ * polling instead of Realtime). Either way the perspective is forced to
+ * "player" here so nothing DM-only can leak onto the projector.
  */
 export function CastView({
   roomId,
   roomName,
   userId,
+  castToken,
 }: {
   roomId: string;
   roomName: string;
   userId: string;
+  castToken?: string;
 }) {
-  const room = useRoomState(roomId, userId, "player");
+  const castClient = useMemo(
+    () => (castToken ? createCastClient(castToken) : undefined),
+    [castToken],
+  );
+  const room = useRoomState(
+    roomId,
+    userId,
+    "player",
+    castClient ? { client: castClient, realtime: false } : undefined,
+  );
   const scene = room.activeScene;
   const inCombat = scene?.mode === "combat";
   const spotlightName = scene?.spotlight_user_id
@@ -46,7 +63,8 @@ export function CastView({
   return (
     <div className="relative flex h-dvh flex-col bg-neutral-950 text-neutral-100">
       {scene && (
-        <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-md bg-black/50 px-2 py-1 text-xs text-neutral-300">
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-1.5 rounded-md bg-black/50 px-2 py-1 text-xs text-neutral-300">
+          <Logo className="h-3.5 w-3.5" />
           {roomName} · {scene.name}
           {inCombat ? ` · round ${scene.round}` : ""}
         </div>
