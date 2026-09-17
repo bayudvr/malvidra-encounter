@@ -15,6 +15,7 @@ import type {
   Room,
   Scene,
   Token,
+  Wall,
 } from "@/lib/room/types";
 
 type State = {
@@ -26,6 +27,7 @@ type State = {
   combatants: Combatant[];
   fogPolygons: FogPolygon[];
   fogDoors: FogDoor[];
+  walls: Wall[];
   loading: boolean;
 };
 
@@ -38,6 +40,7 @@ const EMPTY: State = {
   combatants: [],
   fogPolygons: [],
   fogDoors: [],
+  walls: [],
   loading: true,
 };
 
@@ -142,10 +145,11 @@ export function useRoomState(
           combatants: [],
           fogPolygons: [],
           fogDoors: [],
+          walls: [],
         }));
         return;
       }
-      const [tokens, combatants, fogPolygons, fogDoors] = await Promise.all([
+      const [tokens, combatants, fogPolygons, fogDoors, walls] = await Promise.all([
         supabase
           .from("tokens")
           .select("*")
@@ -159,6 +163,7 @@ export function useRoomState(
           .order("created_at", { ascending: true }),
         supabase.from("fog_polygons").select("*").eq("scene_id", sceneId),
         supabase.from("fog_doors").select("*").eq("scene_id", sceneId),
+        supabase.from("walls").select("*").eq("scene_id", sceneId),
       ]);
       // Ignore if the active scene changed while we were loading.
       if (activeSceneRef.current !== sceneId) return;
@@ -168,6 +173,7 @@ export function useRoomState(
         combatants: combatants.data ?? [],
         fogPolygons: fogPolygons.data ?? [],
         fogDoors: fogDoors.data ?? [],
+        walls: walls.data ?? [],
       }));
     },
     [supabase],
@@ -385,6 +391,35 @@ export function useRoomState(
           });
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "walls",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          setState((prev) => {
+            const sceneId = activeSceneRef.current;
+            if (payload.eventType === "DELETE") {
+              return {
+                ...prev,
+                walls: prev.walls.filter(
+                  (w) => w.id !== (payload.old as { id: string }).id,
+                ),
+              };
+            }
+            const row = payload.new as Wall;
+            if (row.scene_id !== sceneId) return prev;
+            const exists = prev.walls.some((w) => w.id === row.id);
+            return {
+              ...prev,
+              walls: exists ? prev.walls : [...prev.walls, row],
+            };
+          });
+        },
+      )
       .subscribe();
 
     return () => {
@@ -455,6 +490,21 @@ export function useRoomState(
     );
   }, []);
 
+  const addWallLocal = useCallback((wall: Wall) => {
+    setState((prev) =>
+      prev.walls.some((w) => w.id === wall.id)
+        ? prev
+        : { ...prev, walls: [...prev.walls, wall] },
+    );
+  }, []);
+
+  const removeWallLocal = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      walls: prev.walls.filter((w) => w.id !== id),
+    }));
+  }, []);
+
   return {
     ...state,
     supabase,
@@ -473,6 +523,8 @@ export function useRoomState(
     removeFogPolygonLocal,
     patchFogDoorLocal,
     addFogDoorLocal,
+    addWallLocal,
+    removeWallLocal,
   };
 }
 

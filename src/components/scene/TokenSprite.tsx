@@ -37,7 +37,13 @@ export function TokenSprite({
   /** Whether this viewer may see the combatant's HP / AC numbers. */
   revealStats?: boolean;
   onDragStart?: (e: Konva.KonvaEventObject<DragEvent>) => void;
-  onDragMove?: (x: number, y: number) => void;
+  /**
+   * Called on every drag tick with the node's current (world) position.
+   * Returning `{x, y}` snaps the Konva node back to that position this same
+   * tick — used to stop a token dead at a wall instead of letting it drag
+   * through. Return nothing to accept the position as-is.
+   */
+  onDragMove?: (x: number, y: number) => { x: number; y: number } | void;
   onDragEnd: (x: number, y: number) => void;
   onSelect: (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
 }) {
@@ -82,7 +88,8 @@ export function TokenSprite({
       onTap={onSelect}
       onDragStart={(e: Konva.KonvaEventObject<DragEvent>) => onDragStart?.(e)}
       onDragMove={(e: Konva.KonvaEventObject<DragEvent>) => {
-        onDragMove?.(e.target.x(), e.target.y());
+        const corrected = onDragMove?.(e.target.x(), e.target.y());
+        if (corrected) e.target.position(corrected);
       }}
       onDragEnd={(e: Konva.KonvaEventObject<DragEvent>) => {
         onDragEnd(e.target.x(), e.target.y());

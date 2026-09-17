@@ -76,6 +76,69 @@ function segmentsIntersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt) {
   );
 }
 
+// Distance along a ray from `origin` in direction `dir` (unit vector, but
+// doesn't need to be — only its direction matters) to where it crosses
+// segment a-b, or null if it doesn't. Standard ray/segment intersection via
+// the "2D visibility" formulation: v3 is dir rotated 90°, so both v2·v3 and
+// v1·v3 reduce to plain dot products instead of a full 2x2 solve.
+function rayIntersectSegment(
+  origin: Pt,
+  dir: Pt,
+  a: Pt,
+  b: Pt,
+): number | null {
+  const v1 = { x: origin.x - a.x, y: origin.y - a.y };
+  const v2 = { x: b.x - a.x, y: b.y - a.y };
+  const v3 = { x: -dir.y, y: dir.x };
+  const denom = v2.x * v3.x + v2.y * v3.y;
+  if (Math.abs(denom) < 1e-10) return null; // ray parallel to segment
+  const t1 = (v2.x * v1.y - v2.y * v1.x) / denom; // distance along the ray
+  const t2 = (v1.x * v3.x + v1.y * v3.y) / denom; // fraction along the segment
+  if (t1 < 0 || t2 < 0 || t2 > 1) return null;
+  return t1;
+}
+
+// A token's line-of-sight vision area: a fan of rays from `origin` out to
+// `radius`, stopped short by whichever occluder segment (wall/room edge)
+// each ray hits first. Sampling every occluder endpoint (±epsilon, to catch
+// the sliver of visibility just past a corner) gives the polygon a sharp
+// edge exactly at each wall corner; the coarse circle samples fill in the
+// open space between occluders so it reads as a circle, not a jagged
+// few-sided fan, when nothing is nearby to block it. Result is always a
+// valid simple polygon (star-shaped from `origin` by construction — points
+// are emitted in angle order around it).
+function computeVisibilityPolygon(
+  origin: Pt,
+  radius: number,
+  occluders: [Pt, Pt][],
+): Pt[] {
+  const EPS = 0.0001;
+  const angles = new Set<number>();
+  const CIRCLE_SAMPLES = 90;
+  for (let i = 0; i < CIRCLE_SAMPLES; i++) {
+    angles.add((i / CIRCLE_SAMPLES) * Math.PI * 2);
+  }
+  for (const [a, b] of occluders) {
+    for (const p of [a, b]) {
+      const ang = Math.atan2(p.y - origin.y, p.x - origin.x);
+      angles.add(ang);
+      angles.add(ang + EPS);
+      angles.add(ang - EPS);
+    }
+  }
+  return Array.from(angles)
+    .sort((a, b) => a - b)
+    .map((ang) => {
+      const dir = { x: Math.cos(ang), y: Math.sin(ang) };
+      let dist = radius;
+      for (const [a, b] of occluders) {
+        const t = rayIntersectSegment(origin, dir, a, b);
+        if (t != null && t < dist) dist = t;
+      }
+      return { x: origin.x + dir.x * dist, y: origin.y + dir.y * dist };
+    });
+}
+
 function closestPointOnSegment(p: Pt, a: Pt, b: Pt) {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
@@ -177,8 +240,19 @@ export function SceneCanvas({
   const [polygonPoints, setPolygonPoints] = useState<Pt[]>([]);
   const [polyCursor, setPolyCursor] = useState<Pt | null>(null);
   const [addingDoor, setAddingDoor] = useState(false);
-  // Fog/door rows this session created, newest last — Ctrl+Z pops and deletes.
-  const fogUndo = useRef<{ kind: "polygon" | "door"; id: string }[]>([]);
+  // Fog/door/wall rows this session created, newest last — Ctrl+Z pops and deletes.
+  const fogUndo = useRef<{ kind: "polygon" | "door" | "wall"; id: string }[]>([]);
+
+  // Inner walls: same freehand-polygon authoring as fog rooms above, but the
+  // shape is never filled/revealed — its edges just block token movement.
+  const [drawingWall, setDrawingWall] = useState(false);
+  const [wallPoints, setWallPoints] = useState<Pt[]>([]);
+  const [wallCursor, setWallCursor] = useState<Pt | null>(null);
+  // Per-token last-known-valid position during a drag, seeded on drag-start —
+  // advances a tick at a time as long as the step doesn't cross a wall, so a
+  // token dragged fast still stops right at the wall instead of tunnelling
+  // through between two sampled positions.
+  const dragOrigin = useRef<Map<string, Pt>>(new Map());
 
   const [aoeMenu, setAoeMenu] = useState(false);
   const [aoeMode, setAoeMode] = useState<
@@ -201,13 +275,15 @@ export function SceneCanvas({
     setDrawingPolygon(false);
     setPolygonPoints([]);
     setAddingDoor(false);
+    setDrawingWall(false);
+    setWallPoints([]);
     setAoeMode(null);
     setAoe(null);
     fogUndo.current = [];
   }, [scene.id]);
 
   // Ctrl/Cmd-Z: while drawing, drop the last point; otherwise undo the last
-  // fog polygon or door this session added.
+  // fog polygon, door, or wall this session added.
   useEffect(() => {
     if (!isDM) return;
     function onKey(e: KeyboardEvent) {
@@ -226,18 +302,24 @@ export function SceneCanvas({
         undoPolygonPoint();
         return;
       }
+      if (drawingWall && wallPoints.length > 0) {
+        e.preventDefault();
+        undoWallPoint();
+        return;
+      }
       const last = fogUndo.current.pop();
       if (!last) return;
       e.preventDefault();
       if (last.kind === "polygon") void deletePolygon(last.id);
+      else if (last.kind === "wall") void deleteWall(last.id);
       else void deleteDoor(last.id);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // deletePolygon/deleteDoor/undoPolygonPoint are recreated each render but
-    // don't close over anything stale that matters here.
+    // deletePolygon/deleteDoor/deleteWall/undoPolygonPoint/undoWallPoint are
+    // recreated each render but don't close over anything stale that matters here.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDM, drawingPolygon, polygonPoints.length]);
+  }, [isDM, drawingPolygon, polygonPoints.length, drawingWall, wallPoints.length]);
 
   // Track the Shift key so a shift-drag on empty map draws a selection
   // marquee rather than panning the stage.
@@ -484,6 +566,12 @@ export function SceneCanvas({
       if (p) addPolygonPoint(p);
       return;
     }
+    if (drawingWall) {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (p) addWallPoint(p);
+      return;
+    }
     if (addingDoor) {
       e.evt.preventDefault();
       const p = worldPointer(e);
@@ -537,6 +625,11 @@ export function SceneCanvas({
       if (p) setPolyCursor(p);
       return;
     }
+    if (drawingWall) {
+      const p = worldPointer(e);
+      if (p) setWallCursor(p);
+      return;
+    }
     if (aoeMode && aoeDrawing.current) {
       const raw = worldPointer(e);
       if (raw) {
@@ -579,9 +672,9 @@ export function SceneCanvas({
       return;
     }
     if (aoeMode) {
-      // Non-permanent by design — the shape only lives during the drag.
+      // Stays on screen after the drag ends (not saved to the DB) so it can be read/discussed —
+      // starting a new drag replaces it, and "Done"/switching tool (exitAoe) clears it.
       aoeDrawing.current = false;
-      setAoe(null);
       return;
     }
     // The ruler only lives during the interaction — clear it on release.
@@ -613,6 +706,31 @@ export function SceneCanvas({
     );
   }
 
+  // A wall always blocks — unlike a door, it has no open/closed state.
+  // Checked edge-by-edge across every wall polygon in the scene.
+  function crossesWall(a: Pt, b: Pt) {
+    return room.walls.some((w) => {
+      const pts = w.points;
+      for (let i = 0; i < pts.length; i++) {
+        const c = { x: pts[i][0], y: pts[i][1] };
+        const d = { x: pts[(i + 1) % pts.length][0], y: pts[(i + 1) % pts.length][1] };
+        if (segmentsIntersect(a, b, c, d)) return true;
+      }
+      return false;
+    });
+  }
+
+  // Per-token wall-collision step used live during a drag (see dragOrigin):
+  // if the step from the token's last valid spot to (x, y) would cross a
+  // wall, the token stays put at that last valid spot instead. Otherwise the
+  // checkpoint advances to (x, y) and the move is allowed.
+  function resolveWallStep(id: string, x: number, y: number): Pt {
+    const from = dragOrigin.current.get(id) ?? { x, y };
+    if (crossesWall(from, { x, y })) return from;
+    dragOrigin.current.set(id, { x, y });
+    return { x, y };
+  }
+
   async function moveToken(id: string, rawX: number, rawY: number) {
     const before = room.tokens.find((t) => t.id === id);
     let x = rawX;
@@ -629,17 +747,26 @@ export function SceneCanvas({
     }
     // Check against the raw (pre-snap) drop point, not the grid-snapped one —
     // snapping can land the token's final resting spot on the far side of a
-    // door whose freehand position doesn't line up with a grid intersection,
-    // which would let a blocked drag sneak through undetected.
-    if (
-      before &&
-      crossesClosedDoor({ x: before.x, y: before.y }, { x: rawX, y: rawY })
-    ) {
-      // Snap it back — the visual drag already moved it, so without this
-      // patch it'd stay wherever the drag dropped it.
-      room.patchTokenLocal(id, { x: before.x, y: before.y });
-      toast.error("Blocked by a closed door");
-      return;
+    // door/wall whose freehand position doesn't line up with a grid
+    // intersection, which would let a blocked drag sneak through undetected.
+    // Belt-and-suspenders alongside the live per-tick wall stop in
+    // resolveWallStep — that already keeps a normal drag off a wall, this
+    // catches anything that moved a token some other way.
+    if (before) {
+      const from = { x: before.x, y: before.y };
+      const to = { x: rawX, y: rawY };
+      if (crossesClosedDoor(from, to)) {
+        // Snap it back — the visual drag already moved it, so without this
+        // patch it'd stay wherever the drag dropped it.
+        room.patchTokenLocal(id, from);
+        toast.error("Blocked by a closed door");
+        return;
+      }
+      if (crossesWall(from, to)) {
+        room.patchTokenLocal(id, from);
+        toast.error("Blocked by a wall");
+        return;
+      }
     }
     room.patchTokenLocal(id, { x, y });
     const { error } = await room.supabase
@@ -662,8 +789,10 @@ export function SceneCanvas({
     for (const [id, o] of origin.positions) {
       const rawX = o.x + dx;
       const rawY = o.y + dy;
-      if (crossesClosedDoor({ x: o.x, y: o.y }, { x: rawX, y: rawY })) {
-        room.patchTokenLocal(id, { x: o.x, y: o.y });
+      const from = { x: o.x, y: o.y };
+      const to = { x: rawX, y: rawY };
+      if (crossesClosedDoor(from, to) || crossesWall(from, to)) {
+        room.patchTokenLocal(id, from);
         blocked = true;
         continue;
       }
@@ -677,7 +806,7 @@ export function SceneCanvas({
       room.patchTokenLocal(id, { x, y });
       updates.push({ id, x, y });
     }
-    if (blocked) toast.error("Some tokens blocked by a closed door");
+    if (blocked) toast.error("Some tokens blocked by a closed door or wall");
     const results = await Promise.all(
       updates.map((u) =>
         room.supabase.from("tokens").update({ x: u.x, y: u.y }).eq("id", u.id),
@@ -797,8 +926,14 @@ export function SceneCanvas({
         anchorStart: { x: t.x, y: t.y },
         positions,
       };
+      // Every token in the multi-drag gets its own wall checkpoint, seeded
+      // at its own current position (not the anchor's).
+      dragOrigin.current = new Map(
+        Array.from(positions, ([id, o]) => [id, { x: o.x, y: o.y }]),
+      );
     } else {
       multiDragRef.current = null;
+      dragOrigin.current = new Map([[t.id, { x: t.x, y: t.y }]]);
       // Dragging a token that wasn't part of the selection makes it the
       // selection (unless Shift is held to extend it).
       if (isDM && !e.evt?.shiftKey && !selectedIds.includes(t.id)) {
@@ -856,6 +991,57 @@ export function SceneCanvas({
     fogUndo.current = fogUndo.current.filter((e) => e.id !== id);
     room.removeFogPolygonLocal(id);
     const { error } = await room.supabase.from("fog_polygons").delete().eq("id", id);
+    if (error) toast.error(error.message);
+  }
+
+  // Same authoring gesture as addPolygonPoint/finishPolygon above, saved to
+  // "walls" instead of "fog_polygons".
+  function addWallPoint(p: Pt) {
+    if (wallPoints.length >= 3) {
+      const first = wallPoints[0];
+      const closeThreshold = 16 / view.scale;
+      if (Math.hypot(p.x - first.x, p.y - first.y) <= closeThreshold) {
+        void finishWall();
+        return;
+      }
+    }
+    setWallPoints((pts) => [...pts, p]);
+  }
+
+  function undoWallPoint() {
+    setWallPoints((pts) => pts.slice(0, -1));
+  }
+
+  function cancelWall() {
+    setDrawingWall(false);
+    setWallPoints([]);
+  }
+
+  async function finishWall() {
+    if (wallPoints.length < 3) {
+      toast.error("Need at least 3 points to close a wall");
+      return;
+    }
+    const points: [number, number][] = wallPoints.map((p) => [p.x, p.y]);
+    setWallPoints([]);
+    setDrawingWall(false);
+    const { data, error } = await room.supabase
+      .from("walls")
+      .insert({ scene_id: scene.id, room_id: scene.room_id, points })
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error(error?.message ?? "Couldn't add wall");
+      return;
+    }
+    room.addWallLocal(data);
+    fogUndo.current.push({ kind: "wall", id: data.id });
+  }
+
+  async function deleteWall(id: string) {
+    fogUndo.current = fogUndo.current.filter((e) => e.id !== id);
+    room.removeWallLocal(id);
+    const { error } = await room.supabase.from("walls").delete().eq("id", id);
     if (error) toast.error(error.message);
   }
 
@@ -959,6 +1145,48 @@ export function SceneCanvas({
     [room.fogDoors, scene.grid_size],
   );
 
+  // Occluders for token vision: every wall edge, plus every edge of a
+  // fog room that ISN'T currently revealed. A revealed room's edges are
+  // skipped — its fog is already fully gone, so there's nothing left for
+  // vision to occlude there; an unrevealed room has no open door on it by
+  // definition, so its full boundary blocking sight is exactly right (no
+  // per-door gap to carve out of it).
+  const visionOccluders = useMemo((): [Pt, Pt][] => {
+    const segs: [Pt, Pt][] = [];
+    const addEdges = (points: [number, number][]) => {
+      for (let i = 0; i < points.length; i++) {
+        const a = { x: points[i][0], y: points[i][1] };
+        const b = {
+          x: points[(i + 1) % points.length][0],
+          y: points[(i + 1) % points.length][1],
+        };
+        segs.push([a, b]);
+      }
+    };
+    for (const w of room.walls) addEdges(w.points);
+    for (const p of room.fogPolygons) {
+      if (!polygonRevealed(p.points)) addEdges(p.points);
+    }
+    return segs;
+  }, [room.walls, room.fogPolygons, polygonRevealed]);
+
+  // One visibility polygon per player-owned token with a vision radius set —
+  // only player-owned, so a DM-only monster with a radius (if one were ever
+  // set) can't leak the map to players through its own vision.
+  const visionPolygons = useMemo(() => {
+    if (!scene.fog_enabled) return [];
+    return room.tokens
+      .filter((t) => t.owner_user_id && t.vision_radius_ft && t.vision_radius_ft > 0)
+      .map((t) => {
+        const radiusPx =
+          (t.vision_radius_ft! / scene.feet_per_square) * scene.grid_size;
+        return {
+          id: t.id,
+          points: computeVisibilityPolygon({ x: t.x, y: t.y }, radiusPx, visionOccluders),
+        };
+      });
+  }, [room.tokens, visionOccluders, scene.fog_enabled, scene.feet_per_square, scene.grid_size]);
+
   const inCombat = scene.mode === "combat";
   const combatantByToken = useMemo(() => {
     const map = new Map<string, Combatant>();
@@ -987,6 +1215,7 @@ export function SceneCanvas({
           !measuring &&
           !drawingPolygon &&
           !addingDoor &&
+          !drawingWall &&
           !aoeMode &&
           !shiftHeld &&
           !marquee
@@ -1014,7 +1243,7 @@ export function SceneCanvas({
         onTouchMove={stagePointerMove}
         onTouchEnd={stagePointerUp}
         style={
-          measuring || drawingPolygon || addingDoor || aoeMode
+          measuring || drawingPolygon || addingDoor || drawingWall || aoeMode
             ? { cursor: "crosshair" }
             : undefined
         }
@@ -1061,6 +1290,7 @@ export function SceneCanvas({
                     !measuring &&
                     !drawingPolygon &&
                     !addingDoor &&
+                    !drawingWall &&
                     !aoeMode
                   }
                   owned={owned}
@@ -1072,6 +1302,7 @@ export function SceneCanvas({
                       !isDM ||
                       drawingPolygon ||
                       addingDoor ||
+                      drawingWall ||
                       aoeMode
                     )
                       return;
@@ -1088,19 +1319,30 @@ export function SceneCanvas({
                   }}
                   onDragStart={(e) => handleTokenDragStart(t, e)}
                   onDragMove={(x, y) => {
-                    setRuler((r) => (r ? { ...r, x, y } : r));
+                    // Stops the token dead at a wall instead of dragging
+                    // through it — resolved is the raw (x, y) unless a wall
+                    // crossing pinned it back to its last valid spot.
+                    const resolved = resolveWallStep(t.id, x, y);
+                    setRuler((r) =>
+                      r ? { ...r, x: resolved.x, y: resolved.y } : r,
+                    );
                     const origin = multiDragRef.current;
                     if (origin && origin.anchorId === t.id) {
-                      const dx = x - origin.anchorStart.x;
-                      const dy = y - origin.anchorStart.y;
+                      const dx = resolved.x - origin.anchorStart.x;
+                      const dy = resolved.y - origin.anchorStart.y;
                       for (const [id, o] of origin.positions) {
                         if (id === origin.anchorId) continue;
-                        room.patchTokenLocal(id, {
-                          x: o.x + dx,
-                          y: o.y + dy,
-                        });
+                        const followerResolved = resolveWallStep(
+                          id,
+                          o.x + dx,
+                          o.y + dy,
+                        );
+                        room.patchTokenLocal(id, followerResolved);
                       }
                     }
+                    return resolved.x === x && resolved.y === y
+                      ? undefined
+                      : resolved;
                   }}
                   onDragEnd={(x, y) => {
                     setRuler(null);
@@ -1139,6 +1381,22 @@ export function SceneCanvas({
                 />
               ),
             )}
+            {/* Token vision: punches a hole through whatever fog was just
+                drawn above, in the exact shape of what each player token can
+                see (occluded by walls/unrevealed rooms) — same layer/canvas,
+                so destination-out only erases the fog, nothing else. Full
+                opacity regardless of fog_dm_opacity so it reveals fully for
+                both DM and players alike. */}
+            {visionPolygons.map((v) => (
+              <Line
+                key={v.id}
+                points={v.points.flatMap((p) => [p.x, p.y])}
+                closed
+                fill="black"
+                globalCompositeOperation="destination-out"
+                listening={false}
+              />
+            ))}
           </Layer>
         )}
 
@@ -1244,6 +1502,83 @@ export function SceneCanvas({
                   y={p.y}
                   radius={4 / view.scale}
                   fill="#f59e0b"
+                  listening={false}
+                />
+              ))}
+          </Layer>
+        )}
+
+        {/* Wall editing — DM-only, independent of fog_enabled (a scene with
+            fog off can still use walls for collision). Never rendered to
+            players: the wall IS the map art, this is purely a management
+            overlay for the DM. */}
+        {isDM && (
+          <Layer>
+            {room.walls.map((w) => {
+              const cx = w.points.reduce((s, pt) => s + pt[0], 0) / w.points.length;
+              const cy = w.points.reduce((s, pt) => s + pt[1], 0) / w.points.length;
+              const r = 13 / view.scale;
+              return (
+                <Group key={w.id}>
+                  <Line
+                    points={w.points.flat()}
+                    closed
+                    stroke="#ea580c"
+                    strokeWidth={2 / view.scale}
+                    dash={[6 / view.scale, 4 / view.scale]}
+                    listening={false}
+                  />
+                  <Circle
+                    x={cx}
+                    y={cy}
+                    radius={r}
+                    fill="#f87171"
+                    stroke="#450a0a"
+                    strokeWidth={1 / view.scale}
+                    onClick={(e) => {
+                      e.cancelBubble = true;
+                      void deleteWall(w.id);
+                    }}
+                    onTap={(e) => {
+                      e.cancelBubble = true;
+                      void deleteWall(w.id);
+                    }}
+                  />
+                  <Text
+                    text="✕"
+                    x={cx - r}
+                    y={cy - r * 0.72}
+                    width={r * 2}
+                    align="center"
+                    fontSize={r * 1.25}
+                    fontStyle="bold"
+                    fill="#450a0a"
+                    listening={false}
+                  />
+                </Group>
+              );
+            })}
+
+            {drawingWall && wallPoints.length > 0 && (
+              <Line
+                points={[
+                  ...wallPoints.flatMap((p) => [p.x, p.y]),
+                  ...(wallCursor ? [wallCursor.x, wallCursor.y] : []),
+                ]}
+                stroke="#ea580c"
+                strokeWidth={2 / view.scale}
+                dash={[8 / view.scale, 5 / view.scale]}
+                listening={false}
+              />
+            )}
+            {drawingWall &&
+              wallPoints.map((p, i) => (
+                <Circle
+                  key={i}
+                  x={p.x}
+                  y={p.y}
+                  radius={4 / view.scale}
+                  fill="#ea580c"
                   listening={false}
                 />
               ))}
@@ -1359,6 +1694,7 @@ export function SceneCanvas({
                   setMeasureMenu(false);
                   cancelPolygon();
                   setAddingDoor(false);
+                  cancelWall();
                   exitAoe();
                 }}
                 className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
@@ -1389,6 +1725,7 @@ export function SceneCanvas({
               onClick={() => {
                 setFogMenu((o) => !o);
                 exitMeasure();
+                cancelWall();
                 exitAoe();
               }}
               className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
@@ -1413,6 +1750,7 @@ export function SceneCanvas({
                     setDrawingPolygon(true);
                     setPolygonPoints([]);
                     setAddingDoor(false);
+                    cancelWall();
                     setFogMenu(false);
                   }}
                   className="block w-full px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
@@ -1428,6 +1766,7 @@ export function SceneCanvas({
                   onClick={() => {
                     setAddingDoor(true);
                     cancelPolygon();
+                    cancelWall();
                     setFogMenu(false);
                   }}
                   className="block w-full border-t border-neutral-800 px-3 py-2 text-left text-neutral-200 hover:bg-neutral-800"
@@ -1481,6 +1820,7 @@ export function SceneCanvas({
               exitMeasure();
               cancelPolygon();
               setAddingDoor(false);
+              cancelWall();
             }}
             className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
               aoeMode
@@ -1537,6 +1877,62 @@ export function SceneCanvas({
             </button>
           )}
         </div>
+
+        {isDM && (
+          <div className="relative flex items-end gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (drawingWall) {
+                  cancelWall();
+                  return;
+                }
+                exitMeasure();
+                cancelPolygon();
+                setAddingDoor(false);
+                exitAoe();
+                setDrawingWall(true);
+                setWallPoints([]);
+                toast.info("Click points to outline a wall — click the first point to close");
+              }}
+              className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+                drawingWall
+                  ? "border-amber-400 bg-amber-400/20 text-amber-200"
+                  : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+              }`}
+            >
+              🧱 {drawingWall ? "Outlining wall…" : "Wall"}
+            </button>
+
+            {drawingWall && wallPoints.length > 0 && (
+              <button
+                type="button"
+                onClick={undoWallPoint}
+                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                Undo point
+              </button>
+            )}
+            {drawingWall && wallPoints.length >= 3 && (
+              <button
+                type="button"
+                onClick={() => void finishWall()}
+                className="rounded-md border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-600/30"
+              >
+                Finish
+              </button>
+            )}
+            {drawingWall && (
+              <button
+                type="button"
+                onClick={cancelWall}
+                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200">
           <button
@@ -1687,8 +2083,9 @@ function MultiTokenBar({
   );
 }
 
-// Renders the live (non-persistent) AOE template preview while dragging —
-// disappears on mouse-up, nothing is ever saved to the DB.
+// Renders the AOE template — live while dragging, then stays put after mouse-up until the
+// next drag replaces it or exitAoe() clears it (via "Done" or switching tool). Nothing is
+// ever saved to the DB — purely a local visual aid.
 function AoeShape({
   mode,
   aoe,
@@ -1837,6 +2234,7 @@ function TokenInspector({
   const [label, setLabel] = useState(token.label);
   const [hp, setHp] = useState(token.hp);
   const [ac, setAc] = useState(token.ac);
+  const [visionFt, setVisionFt] = useState(token.vision_radius_ft ?? "");
 
   async function update(patch: TokenUpdate) {
     const { error } = await room.supabase
@@ -1904,6 +2302,30 @@ function TokenInspector({
           </option>
         ))}
       </select>
+
+      {/* Only meaningful once the token has an owner — vision only reveals
+          fog for owned (player) tokens, so an unowned monster's radius (if
+          it even had one) can't leak the map to players. */}
+      {token.owner_user_id && (
+        <label className="mb-2 flex items-center justify-between gap-2 text-xs text-neutral-500">
+          Vision (ft)
+          <input
+            type="number"
+            min={0}
+            step={5}
+            value={visionFt}
+            onChange={(e) => setVisionFt(e.target.value)}
+            onBlur={() => {
+              const n = visionFt === "" ? null : Number(visionFt);
+              if (n !== (token.vision_radius_ft ?? null)) {
+                update({ vision_radius_ft: n });
+              }
+            }}
+            placeholder="none"
+            className="w-16 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-right text-neutral-200"
+          />
+        </label>
+      )}
 
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs text-neutral-500">Size</span>

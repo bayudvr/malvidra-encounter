@@ -173,6 +173,7 @@ export interface Database {
           is_hidden: boolean;
           hp: number;
           ac: number;
+          vision_radius_ft: number | null;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -189,6 +190,7 @@ export interface Database {
           is_hidden?: boolean;
           hp?: number;
           ac?: number;
+          vision_radius_ft?: number | null;
           created_at?: string;
         };
         Update: {
@@ -202,6 +204,7 @@ export interface Database {
           is_hidden?: boolean;
           hp?: number;
           ac?: number;
+          vision_radius_ft?: number | null;
         };
         Relationships: [];
       };
@@ -343,6 +346,23 @@ export interface Database {
         Update: {
           is_open?: boolean;
         };
+        Relationships: [];
+      };
+      walls: {
+        Row: {
+          id: string;
+          scene_id: string;
+          room_id: string;
+          points: [number, number][];
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          scene_id: string;
+          room_id: string;
+          points: [number, number][];
+          created_at?: string;
+        };
+        Update: Record<string, never>;
         Relationships: [];
       };
       player_requests: {
