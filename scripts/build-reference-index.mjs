@@ -87,3 +87,23 @@ entries.sort((a, b) => a.name.localeCompare(b.name));
 const outPath = join(process.cwd(), "public", "reference-index.json");
 writeFileSync(outPath, JSON.stringify(entries));
 console.log(`Wrote ${entries.length} entries to ${outPath}`);
+
+// --- Adventures -------------------------------------------------------------
+// A separate small index (browsed, not name-searched like the entries above): id/name/source/
+// level range + each chapter's name and header list, straight from data/adventures.json — that
+// file already IS just this metadata, no full adventure text. The full adventure text
+// (data/adventure/adventure-<id>.json, fetched lazily per adventure — see
+// src/lib/reference/fetch.ts) is a completely separate, much bigger file per book.
+const { adventure = [] } = readJson("adventures.json");
+const adventures = adventure.map((a) => ({
+  id: a.id,
+  name: a.name,
+  source: a.source,
+  file: `adventure/adventure-${a.id.toLowerCase()}.json`,
+  level: a.level ?? null,
+  contents: (a.contents ?? []).map((c) => ({ name: c.name, headers: c.headers ?? [] })),
+}));
+
+const advOutPath = join(process.cwd(), "public", "adventure-index.json");
+writeFileSync(advOutPath, JSON.stringify(adventures));
+console.log(`Wrote ${adventures.length} adventures to ${advOutPath}`);

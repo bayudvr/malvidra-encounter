@@ -365,18 +365,52 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      token_counters: {
+        Row: {
+          id: string;
+          token_id: string;
+          room_id: string;
+          name: string;
+          current: number;
+          max: number;
+          sort_order: number;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          token_id: string;
+          room_id: string;
+          name?: string;
+          current?: number;
+          max?: number;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          name?: string;
+          current?: number;
+          max?: number;
+          sort_order?: number;
+        };
+        Relationships: [];
+      };
       dm_notes: {
         Row: {
+          id: string;
           room_id: string;
+          title: string;
           content: string;
           updated_at: string;
-        };
+        } & Timestamps;
         Insert: {
+          id?: string;
           room_id: string;
+          title?: string;
           content?: string;
+          created_at?: string;
           updated_at?: string;
         };
         Update: {
+          title?: string;
           content?: string;
           updated_at?: string;
         };

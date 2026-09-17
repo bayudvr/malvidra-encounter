@@ -1,4 +1,9 @@
-import type { ReferenceDetail, ReferenceIndexEntry } from "@/lib/reference/types";
+import type {
+  AdventureIndexEntry,
+  AdventureSection,
+  ReferenceDetail,
+  ReferenceIndexEntry,
+} from "@/lib/reference/types";
 
 // Same repo the local index (public/reference-index.json, scripts/build-reference-index.mjs)
 // was generated from. raw.githubusercontent.com serves this with Access-Control-Allow-Origin: *
@@ -55,4 +60,40 @@ export async function loadReferenceDetail(entry: ReferenceIndexEntry): Promise<R
   );
   if (!found) throw new Error(`"${entry.name}" (${entry.source}) not found in ${entry.file}`);
   return found as ReferenceDetail;
+}
+
+let adventureIndexPromise: Promise<AdventureIndexEntry[]> | null = null;
+
+/** Fetched once per page load and cached — small (~400KB) id/name/source/chapter-list metadata. */
+export function loadAdventureIndex(): Promise<AdventureIndexEntry[]> {
+  if (!adventureIndexPromise) {
+    adventureIndexPromise = fetch("/adventure-index.json").then((r) => {
+      if (!r.ok) throw new Error(`Failed to load adventure index: ${r.status}`);
+      return r.json();
+    });
+  }
+  return adventureIndexPromise;
+}
+
+// A full adventure file (data/adventure/adventure-<id>.json) is a separate, much bigger fetch
+// than the metadata above — only made once the DM actually opens that adventure, and cached so
+// flipping between its chapters doesn't refetch.
+const adventureCache = new Map<string, Promise<AdventureSection[]>>();
+
+function loadAdventureFile(file: string): Promise<AdventureSection[]> {
+  let p = adventureCache.get(file);
+  if (!p) {
+    p = fetch(RAW_BASE + file).then(async (r) => {
+      if (!r.ok) throw new Error(`Failed to fetch ${file}: ${r.status}`);
+      const json = await r.json();
+      return (json.data ?? []) as AdventureSection[];
+    });
+    adventureCache.set(file, p);
+  }
+  return p;
+}
+
+/** All of one adventure's top-level chapters/sections, in book order. */
+export function loadAdventure(entry: AdventureIndexEntry): Promise<AdventureSection[]> {
+  return loadAdventureFile(entry.file);
 }

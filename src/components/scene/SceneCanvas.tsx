@@ -22,6 +22,7 @@ import type {
   FogDoor,
   Scene,
   Token,
+  TokenCounter,
   TokenUpdate,
 } from "@/lib/room/types";
 import { TokenSprite } from "@/components/scene/TokenSprite";
@@ -2235,6 +2236,7 @@ function TokenInspector({
   const [hp, setHp] = useState(token.hp);
   const [ac, setAc] = useState(token.ac);
   const [visionFt, setVisionFt] = useState(token.vision_radius_ft ?? "");
+  const [counters, setCounters] = useState<TokenCounter[]>([]);
 
   async function update(patch: TokenUpdate) {
     const { error } = await room.supabase
@@ -2243,6 +2245,71 @@ function TokenInspector({
       .eq("id", token.id);
     if (error) toast.error(error.message);
     else room.reloadScene();
+  }
+
+  // DM-only generic counters (legendary resistances, lair actions, recharge, ...) — same idea
+  // as 5etools' DM Screen "custom counter" widget. Players track their own resources (spell
+  // slots included) on their own character sheet, so this never needs owner-editable access.
+  useEffect(() => {
+    room.supabase
+      .from("token_counters")
+      .select("*")
+      .eq("token_id", token.id)
+      .order("sort_order", { ascending: true })
+      .then(({ data }) => setCounters((data as TokenCounter[]) ?? []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token.id]);
+
+  type CounterPatch = Partial<Pick<TokenCounter, "name" | "current" | "max">>;
+
+  function setCounterLocal(id: string, patch: CounterPatch) {
+    setCounters((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }
+
+  async function commitCounter(id: string, patch: CounterPatch) {
+    setCounterLocal(id, patch);
+    const { error } = await room.supabase.from("token_counters").update(patch).eq("id", id);
+    if (error) toast.error(error.message);
+  }
+
+  async function addCounter() {
+    const { data, error } = await room.supabase
+      .from("token_counters")
+      .insert({
+        token_id: token.id,
+        room_id: token.room_id,
+        name: "Counter",
+        sort_order: counters.length,
+      })
+      .select()
+      .single();
+    if (error || !data) return toast.error(error?.message ?? "Couldn't add counter");
+    setCounters((cs) => [...cs, data as TokenCounter]);
+  }
+
+  // "aku butuh jenis counter yang sama tapi beda [nilai], tambahin duplikat aja" — clone
+  // name/current/max into a new row rather than retyping from scratch.
+  async function duplicateCounter(c: TokenCounter) {
+    const { data, error } = await room.supabase
+      .from("token_counters")
+      .insert({
+        token_id: token.id,
+        room_id: token.room_id,
+        name: c.name,
+        current: c.current,
+        max: c.max,
+        sort_order: counters.length,
+      })
+      .select()
+      .single();
+    if (error || !data) return toast.error(error?.message ?? "Couldn't duplicate counter");
+    setCounters((cs) => [...cs, data as TokenCounter]);
+  }
+
+  async function removeCounter(id: string) {
+    setCounters((cs) => cs.filter((c) => c.id !== id));
+    const { error } = await room.supabase.from("token_counters").delete().eq("id", id);
+    if (error) toast.error(error.message);
   }
 
   const players = room.members.filter((m) => m.role === "player");
@@ -2373,6 +2440,77 @@ function TokenInspector({
         />
         Hidden from players
       </label>
+
+      <div className="mb-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-neutral-500">Counters</span>
+          <button
+            type="button"
+            onClick={addCounter}
+            className="text-xs text-amber-300 hover:text-amber-200"
+          >
+            + Add
+          </button>
+        </div>
+        {counters.map((c) => (
+          <div key={c.id} className="mb-1 flex items-center gap-1">
+            <input
+              value={c.name}
+              onChange={(e) => setCounterLocal(c.id, { name: e.target.value })}
+              onBlur={(e) => commitCounter(c.id, { name: e.target.value })}
+              className="w-16 flex-1 truncate rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-xs text-neutral-200"
+            />
+            <button
+              type="button"
+              onClick={() => commitCounter(c.id, { current: Math.max(0, c.current - 1) })}
+              className="rounded border border-neutral-700 px-1 text-xs text-neutral-300 hover:bg-neutral-800"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              value={c.current}
+              onChange={(e) => commitCounter(c.id, { current: Number(e.target.value) })}
+              className="w-8 rounded border border-neutral-700 bg-neutral-950 px-0.5 py-0.5 text-center text-xs text-neutral-200"
+            />
+            <span className="text-xs text-neutral-500">/</span>
+            <input
+              type="number"
+              value={c.max}
+              onChange={(e) => setCounterLocal(c.id, { max: Number(e.target.value) })}
+              onBlur={(e) => commitCounter(c.id, { max: Number(e.target.value) })}
+              className="w-8 rounded border border-neutral-700 bg-neutral-950 px-0.5 py-0.5 text-center text-xs text-neutral-200"
+            />
+            <button
+              type="button"
+              onClick={() =>
+                commitCounter(c.id, {
+                  current: c.max > 0 ? Math.min(c.max, c.current + 1) : c.current + 1,
+                })
+              }
+              className="rounded border border-neutral-700 px-1 text-xs text-neutral-300 hover:bg-neutral-800"
+            >
+              +
+            </button>
+            <button
+              type="button"
+              onClick={() => duplicateCounter(c)}
+              title="Duplicate"
+              className="text-neutral-500 hover:text-neutral-200"
+            >
+              ⧉
+            </button>
+            <button
+              type="button"
+              onClick={() => removeCounter(c.id)}
+              title="Remove"
+              className="text-neutral-500 hover:text-red-400"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
 
       {inCombat &&
         (existingCombatant ? (
