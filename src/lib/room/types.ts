@@ -9,6 +9,8 @@ export type RoomWebhook = Tables<"room_webhooks">;
 export type FogPolygon = Tables<"fog_polygons">;
 export type FogDoor = Tables<"fog_doors">;
 export type Wall = Tables<"walls">;
+export type SavedReference = Tables<"saved_references">;
+export type DmNotes = Tables<"dm_notes">;
 export type PlayerRequest = Tables<"player_requests">;
 
 export type SceneUpdate = Database["public"]["Tables"]["scenes"]["Update"];

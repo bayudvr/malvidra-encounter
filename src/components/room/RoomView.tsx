@@ -17,6 +17,8 @@ import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
 import { CastControls } from "@/components/room/CastControls";
 import { PlayerRequests } from "@/components/room/PlayerRequests";
+import { ReferencePanel } from "@/components/room/ReferencePanel";
+import { NotesPanel } from "@/components/room/NotesPanel";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
 import { DiceTray } from "@/components/dice/DiceTray";
@@ -96,6 +98,8 @@ export function RoomView({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {isDM && scene && <ModeToggle room={room} scene={scene} />}
+          {isDM && <NotesPanel room={room} isDM={isDM} />}
+          {isDM && <ReferencePanel room={room} isDM={isDM} />}
           {isDM && (
             <CastControls
               roomId={roomId}

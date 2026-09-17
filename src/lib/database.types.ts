@@ -365,6 +365,44 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      dm_notes: {
+        Row: {
+          room_id: string;
+          content: string;
+          updated_at: string;
+        };
+        Insert: {
+          room_id: string;
+          content?: string;
+          updated_at?: string;
+        };
+        Update: {
+          content?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      saved_references: {
+        Row: {
+          id: string;
+          room_id: string;
+          name: string;
+          type: string;
+          source: string | null;
+          data: Record<string, unknown>;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          room_id: string;
+          name: string;
+          type: string;
+          source?: string | null;
+          data: Record<string, unknown>;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       player_requests: {
         Row: {
           id: string;

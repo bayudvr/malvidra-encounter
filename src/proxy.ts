@@ -8,6 +8,9 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // reference-index.json (public/, fetched client-side by ReferencePanel) is a static asset
+    // like the image extensions below — it must never round-trip through the auth session
+    // check, or an expired/missing session serves the /login redirect's HTML in place of JSON.
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|json)$).*)",
   ],
 };
