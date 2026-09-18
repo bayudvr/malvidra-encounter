@@ -333,8 +333,8 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
           defaultWidth={480}
           defaultHeight={450}
         >
-          <div className="flex flex-1 flex-col overflow-hidden">
-          <div className="flex gap-1 border-b border-neutral-800 px-2 py-1.5 text-xs">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="flex shrink-0 gap-1 border-b border-neutral-800 px-2 py-1.5 text-xs">
               <button
                 type="button"
                 onClick={() => setTab("search")}
@@ -358,8 +358,8 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
               </button>
           </div>
 
-          <div className="flex flex-1 overflow-hidden">
-            <div className="flex w-36 shrink-0 flex-col overflow-y-auto border-r border-neutral-800">
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex w-36 shrink-0 flex-col overflow-hidden border-r border-neutral-800">
               {tab === "search" && (
                 <>
                   <input
@@ -373,7 +373,7 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
                   {query.trim().length >= 2 && results.length === 0 && !indexError && (
                     <div className="p-2 text-xs text-neutral-500">No matches</div>
                   )}
-                  <ul className="overflow-y-auto text-xs">
+                  <ul className="min-h-0 flex-1 overflow-y-auto text-xs">
                     {results.map((e) => (
                       <li key={`${e.type}-${e.source}-${e.name}`}>
                         <button
@@ -433,7 +433,7 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
                   {!adventureIndex && !adventureIndexError && (
                     <div className="p-2 text-xs text-neutral-500">Loading…</div>
                   )}
-                  <ul className="overflow-y-auto text-xs">
+                  <ul className="min-h-0 flex-1 overflow-y-auto text-xs">
                     {adventureResults.map((a) => (
                       <li key={a.id}>
                         <button
@@ -458,7 +458,7 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
                   >
                     ← {pickedAdventure.name}
                   </button>
-                  <ul className="overflow-y-auto text-xs">
+                  <ul className="min-h-0 flex-1 overflow-y-auto text-xs">
                     {pickedAdventure.contents.map((c, i) => (
                       <li key={i}>
                         <button
@@ -479,7 +479,7 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
             </div>
 
             {tab === "adventures" ? (
-              <div className="flex-1 overflow-y-auto p-3 text-sm text-neutral-200">
+              <div className="min-h-0 flex-1 overflow-y-auto p-3 text-sm text-neutral-200">
                 {loadingChapter && <div className="text-xs text-neutral-500">Loading…</div>}
                 {!loadingChapter && chapterIdx == null && (
                   <div className="text-xs text-neutral-500">
@@ -496,7 +496,7 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
                 )}
               </div>
             ) : (
-            <div className="flex-1 overflow-y-auto p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {loadingDetail && <div className="text-xs text-neutral-500">Loading…</div>}
               {!loadingDetail && !selected && (
                 <div className="text-xs text-neutral-500">

@@ -51,7 +51,11 @@ export function FloatingPanel({
           </button>
         </div>
       </div>
-      <div className="flex flex-1 overflow-hidden">{children}</div>
+      {/* min-h-0: without it, a flex child defaults to min-height:auto — tall enough to fit
+          its content — which is exactly what breaks internal scrolling AND makes resizing the
+          window not actually shrink the content area (nested overflow-y-auto panes further down
+          need this same fix). */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
     </Rnd>
   );
 }
