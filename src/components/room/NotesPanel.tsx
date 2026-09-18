@@ -169,7 +169,7 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
           defaultHeight={380}
         >
           <div className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="flex w-32 shrink-0 flex-col overflow-hidden border-r border-neutral-800">
+            <div className="flex w-32 shrink-0 flex-col overflow-y-auto border-r border-neutral-800">
               <button
                 type="button"
                 onClick={createNote}
@@ -177,7 +177,7 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
               >
                 + New note
               </button>
-              <ul className="min-h-0 flex-1 overflow-y-auto text-xs">
+              <ul className="overflow-y-auto text-xs">
                 {notes.length === 0 && (
                   <li className="p-2 text-neutral-500">No notes yet</li>
                 )}
@@ -206,7 +206,7 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
               </ul>
             </div>
 
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="flex flex-1 flex-col overflow-hidden">
               {!selectedId && (
                 <div className="p-3 text-xs text-neutral-500">
                   Pick a note, or create one.
@@ -260,11 +260,11 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
                         setDirty(true);
                       }}
                       placeholder="Markdown — # headers, **bold**, - lists, etc."
-                      className="min-h-0 flex-1 resize-none bg-neutral-950 p-3 font-mono text-xs text-neutral-100 focus:outline-none"
+                      className="flex-1 resize-none bg-neutral-950 p-3 font-mono text-xs text-neutral-100 focus:outline-none"
                       autoFocus
                     />
                   ) : (
-                    <div className="min-h-0 flex-1 overflow-y-auto p-3 text-xs text-neutral-200">
+                    <div className="flex-1 overflow-y-auto p-3 text-xs text-neutral-200">
                       {content ? (
                         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                           {content}
