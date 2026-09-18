@@ -6,6 +6,11 @@ import type { ReactNode } from "react";
 // panel" renderer, not a full reimplementation of 5etools' own — tables/images/a few rarer node
 // types fall back to just rendering their nested entries (if any) with no special layout.
 
+// Images aren't in the 5etools-src data repo at all (too big) — they live in the sibling
+// 5etools-img repo, same mirror/raw.githubusercontent.com convention as the data itself
+// (verified: serves image/webp with the usual open CORS).
+const IMG_BASE = "https://raw.githubusercontent.com/5etools-mirror-3/5etools-img/main/";
+
 const TAG_RE = /\{@(\w+)([^}]*)\}/g;
 
 /** Inline {@tag ...} markup -> plain readable text. */
@@ -47,6 +52,27 @@ function keyed(node: unknown, prefix: string): ReactNode {
   return <Entries key={prefix} node={node as EntryNode} keyPrefix={prefix} />;
 }
 
+/** One {type: "image", href: {type: "internal"|"external", ...}, title?} node. */
+function ImageNode({ node, keyPrefix }: { node: { [key: string]: unknown }; keyPrefix: string }) {
+  const href = node["href"] as { type?: string; path?: string; url?: string } | undefined;
+  if (!href) return null;
+  const src =
+    href.type === "external"
+      ? href.url
+      : href.path
+        ? IMG_BASE + href.path.split("/").map(encodeURIComponent).join("/")
+        : null;
+  if (!src) return null;
+  const title = typeof node["title"] === "string" ? (node["title"] as string) : undefined;
+  return (
+    <figure key={keyPrefix} className="mb-2 last:mb-0">
+      {/* eslint-disable-next-line @next/next/no-img-element -- external, unknown-dimension 5etools/GitHub-hosted images; next/image's domain allowlist + fixed sizing isn't a fit here. */}
+      <img src={src} alt={title ?? ""} className="max-w-full rounded border border-neutral-800" />
+      {title && <figcaption className="mt-1 text-[10px] text-neutral-500">{title}</figcaption>}
+    </figure>
+  );
+}
+
 /** Recursively renders one `entries` value (string | node object | array of either). */
 export function Entries({
   node,
@@ -86,15 +112,29 @@ export function Entries({
       );
     }
     case "entries":
-    case "section":
+    case "section": {
+      // "images" is a sibling array (not nested in `entries`) that sections carrying a map/
+      // illustration attach it under — same shallow lookup the fallback branch below does.
+      const images = node["images"] as EntryNode[] | undefined;
       return (
         <div className="mb-2 last:mb-0">
           {typeof node["name"] === "string" && (
             <div className="font-semibold text-neutral-200">{stripTags(node["name"] as string)}</div>
           )}
           {keyed(entries, `${keyPrefix}-sub`)}
+          {Array.isArray(images) &&
+            images.map((img, i) => (
+              <ImageNode
+                key={`${keyPrefix}-img-${i}`}
+                node={img as { [key: string]: unknown }}
+                keyPrefix={`${keyPrefix}-img-${i}`}
+              />
+            ))}
         </div>
       );
+    }
+    case "image":
+      return <ImageNode node={node} keyPrefix={keyPrefix} />;
     case "item":
     case "itemSub":
       return (
