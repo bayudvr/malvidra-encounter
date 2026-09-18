@@ -1,7 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Rnd } from "react-rnd";
+
+// Height of the header bar alone — what the window collapses to when minimized.
+const HEADER_HEIGHT = 40;
 
 // Shared draggable/resizable window for the DM's side panels (Notes, 5e Reference, ...) —
 // previously each was a fixed-size dropdown anchored under its toggle button, which didn't let
@@ -25,11 +28,22 @@ export function FloatingPanel({
   defaultWidth?: number;
   defaultHeight?: number;
 }) {
+  const [pos, setPos] = useState({ x: defaultX, y: defaultY });
+  const [size, setSize] = useState({ width: defaultWidth, height: defaultHeight });
+  const [minimized, setMinimized] = useState(false);
+
   return (
     <Rnd
-      default={{ x: defaultX, y: defaultY, width: defaultWidth, height: defaultHeight }}
+      position={pos}
+      size={minimized ? { width: size.width, height: HEADER_HEIGHT } : size}
+      onDragStop={(_e, d) => setPos({ x: d.x, y: d.y })}
+      onResizeStop={(_e, _direction, ref, _delta, position) => {
+        setSize({ width: ref.offsetWidth, height: ref.offsetHeight });
+        setPos(position);
+      }}
+      enableResizing={!minimized}
       minWidth={260}
-      minHeight={220}
+      minHeight={minimized ? HEADER_HEIGHT : 220}
       bounds="window"
       dragHandleClassName="floating-panel-handle"
       // react-rnd's Resizable hard-codes display:"inline-block" in its own inline style object,
@@ -46,6 +60,15 @@ export function FloatingPanel({
           {headerExtra}
           <button
             type="button"
+            onClick={() => setMinimized((m) => !m)}
+            className="text-neutral-500 hover:text-neutral-200"
+            aria-label={minimized ? "Restore" : "Minimize"}
+            title={minimized ? "Restore" : "Minimize"}
+          >
+            {minimized ? "▢" : "─"}
+          </button>
+          <button
+            type="button"
             onClick={onClose}
             className="text-neutral-500 hover:text-neutral-200"
             aria-label="Close"
@@ -54,7 +77,9 @@ export function FloatingPanel({
           </button>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+      {!minimized && (
+        <div className="flex min-h-0 flex-1 overflow-hidden">{children}</div>
+      )}
     </Rnd>
   );
 }
