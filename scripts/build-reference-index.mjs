@@ -69,6 +69,43 @@ for (const file of new Set(Object.values(spellIndex))) {
   }
 }
 
+// --- Traps & hazards ------------------------------------------------------
+// A single flat file (no per-source book split like bestiary/spells) — the `file` pointer is
+// just always this same literal name, re-fetched lazily the same way as a book file.
+{
+  const { trap = [], hazard = [] } = readJson("trapshazards.json");
+  for (const t of trap) {
+    entries.push({ name: t.name, type: "trap", source: t.source, file: "trapshazards.json", trapHazType: t.trapHazType ?? null });
+  }
+  for (const h of hazard) {
+    entries.push({ name: h.name, type: "hazard", source: h.source, file: "trapshazards.json", trapHazType: h.trapHazType ?? null });
+  }
+}
+
+// --- Objects (animated statues, siege weapons, ...) ------------------------
+{
+  const { object = [] } = readJson("objects.json");
+  for (const o of object) {
+    entries.push({ name: o.name, type: "object", source: o.source, file: "objects.json", objectType: o.objectType ?? null });
+  }
+}
+
+// --- Items ------------------------------------------------------------------
+// items.json's `item` + items-base.json's `baseitem` only. magicvariants.json's `magicvariant`
+// entries are templates ("+1 Ammunition") applied to a base item via 5etools' copy-merge
+// machinery — same situation as a monster's `_copy` entries below, which this script already
+// skips rather than reimplementing that merge — so they're left out of the index too.
+{
+  const { item = [] } = readJson("items.json");
+  for (const i of item) {
+    entries.push({ name: i.name, type: "item", source: i.source, file: "items.json", rarity: i.rarity ?? null });
+  }
+  const { baseitem = [] } = readJson("items-base.json");
+  for (const b of baseitem) {
+    entries.push({ name: b.name, type: "item", source: b.source, file: "items-base.json", rarity: b.rarity ?? null });
+  }
+}
+
 // --- Conditions/diseases/status — small enough to embed in full, no lazy fetch needed ---
 const conditions = readJson("conditionsdiseases.json");
 for (const kind of ["condition", "disease", "status"]) {

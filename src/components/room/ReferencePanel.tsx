@@ -6,11 +6,13 @@ import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { SavedReference } from "@/lib/room/types";
 import {
+  findLegendaryGroup,
   loadAdventure,
   loadAdventureIndex,
   loadReferenceDetail,
   loadReferenceIndex,
 } from "@/lib/reference/fetch";
+import type { LegendaryGroupEntry } from "@/lib/reference/types";
 import type {
   AdventureIndexEntry,
   AdventureSection,
@@ -74,6 +76,44 @@ function SpellcastingBlock({ sc }: { sc: Record<string, unknown> }) {
   );
 }
 
+/** A monster's `legendaryGroup: {name, source}` points at bestiary/legendarygroups.json for its
+ * lair/regional/legendary actions — a separate, small cached fetch, so this loads it on demand. */
+function LegendaryGroupSection({ name, source }: { name: string; source: string }) {
+  const [group, setGroup] = useState<LegendaryGroupEntry | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    findLegendaryGroup(name, source).then((g) => !cancelled && setGroup(g));
+    return () => {
+      cancelled = true;
+    };
+  }, [name, source]);
+
+  if (!group) return null;
+
+  const sections = [
+    { key: "lairActions" as const, label: "Lair Actions" },
+    { key: "regionalEffects" as const, label: "Regional Effects" },
+    { key: "legendaryActions" as const, label: "Legendary Actions" },
+  ];
+
+  return (
+    <>
+      {sections.map(
+        ({ key, label }) =>
+          group[key] != null && (
+            <div key={key} className="mt-3">
+              <div className="text-xs font-bold uppercase tracking-wide text-amber-400">
+                {label}
+              </div>
+              <Entries node={group[key] as never} keyPrefix={key} />
+            </div>
+          ),
+      )}
+    </>
+  );
+}
+
 /** Selected entry's rendered detail — a monster stat block, spell card, or condition text. */
 function DetailView({ type, data }: SavedReference | { name: string; source: string | null; type: string; data: ReferenceDetail }) {
   if (type === "monster") {
@@ -134,6 +174,84 @@ function DetailView({ type, data }: SavedReference | { name: string; source: str
               </div>
             ),
         )}
+        {m.legendaryGroup != null && typeof m.legendaryGroup === "object" && (
+          <LegendaryGroupSection
+            name={(m.legendaryGroup as { name: string }).name}
+            source={(m.legendaryGroup as { source: string }).source}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (type === "trap" || type === "hazard") {
+    const t = data as Record<string, unknown>;
+    const ratings = Array.isArray(t.rating)
+      ? (t.rating as { tier?: number; threat?: string }[])
+          .map((r) => [r.tier != null ? `Tier ${r.tier}` : null, r.threat].filter(Boolean).join(" "))
+          .filter(Boolean)
+          .join(", ")
+      : "";
+    return (
+      <div className="text-sm">
+        <div className="text-xs italic text-neutral-400">
+          {[t.trapHazType ? String(t.trapHazType) : null, ratings || null].filter(Boolean).join(" · ")}
+        </div>
+        <div className="mt-2">
+          <Entries node={t.entries as never} keyPrefix="trap-entries" />
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "object") {
+    const o = data as Record<string, unknown>;
+    return (
+      <div className="text-sm">
+        <div className="text-xs italic text-neutral-400">
+          {[Array.isArray(o.size) ? (o.size as string[]).join("/") : null, o.objectType ? String(o.objectType) : null]
+            .filter(Boolean)
+            .join(", ")}
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-1 text-xs text-neutral-300">
+          <div>AC {o.ac != null ? String(o.ac) : "—"}</div>
+          <div>HP {o.hp != null ? String(o.hp) : "—"}</div>
+        </div>
+        {ABILS.some((a) => o[a] != null) && (
+          <div className="mt-2 grid grid-cols-6 gap-1 text-center text-xs">
+            {ABILS.map((a) =>
+              o[a] != null ? (
+                <div key={a} className="rounded border border-neutral-800 py-1">
+                  <div className="uppercase text-neutral-500">{a}</div>
+                  <div className="text-neutral-200">
+                    {o[a] as number} ({mod(o[a] as number)})
+                  </div>
+                </div>
+              ) : null,
+            )}
+          </div>
+        )}
+        <div className="mt-2">
+          <Entries node={o.entries as never} keyPrefix="obj-entries" />
+          <Entries node={o.actionEntries as never} keyPrefix="obj-action-entries" />
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "item") {
+    const i = data as Record<string, unknown>;
+    return (
+      <div className="text-sm">
+        <div className="text-xs italic text-neutral-400">
+          {[i.type ? String(i.type) : null, i.rarity && i.rarity !== "none" ? String(i.rarity) : null]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div className="mt-2">
+          <Entries node={i.entries as never} keyPrefix="item-entries" />
+          <Entries node={i.additionalEntries as never} keyPrefix="item-additional-entries" />
+        </div>
       </div>
     );
   }

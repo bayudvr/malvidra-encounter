@@ -18,6 +18,7 @@ import { ModeToggle } from "@/components/room/ModeToggle";
 import { CastControls } from "@/components/room/CastControls";
 import { PlayerRequests } from "@/components/room/PlayerRequests";
 import { ReferencePanel } from "@/components/room/ReferencePanel";
+import { EncounterBuilderPanel } from "@/components/room/EncounterBuilderPanel";
 import { NotesPanel } from "@/components/room/NotesPanel";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
@@ -100,6 +101,7 @@ export function RoomView({
           {isDM && scene && <ModeToggle room={room} scene={scene} />}
           {isDM && <NotesPanel room={room} isDM={isDM} />}
           {isDM && <ReferencePanel room={room} isDM={isDM} />}
+          {isDM && <EncounterBuilderPanel room={room} isDM={isDM} />}
           {isDM && (
             <CastControls
               roomId={roomId}

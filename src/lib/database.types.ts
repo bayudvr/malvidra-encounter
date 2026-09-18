@@ -174,6 +174,9 @@ export interface Database {
           hp: number;
           ac: number;
           vision_radius_ft: number | null;
+          monster_name: string | null;
+          monster_source: string | null;
+          monster_cr: string | null;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -191,6 +194,9 @@ export interface Database {
           hp?: number;
           ac?: number;
           vision_radius_ft?: number | null;
+          monster_name?: string | null;
+          monster_source?: string | null;
+          monster_cr?: string | null;
           created_at?: string;
         };
         Update: {

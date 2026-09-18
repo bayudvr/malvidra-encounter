@@ -16,6 +16,8 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
+import { rollLoot, type LootResult } from "@/lib/loot";
+import { stripTags } from "@/lib/reference/render";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type {
   Combatant,
@@ -2367,6 +2369,23 @@ function TokenInspector({
   const [ac, setAc] = useState(token.ac);
   const [visionFt, setVisionFt] = useState(token.vision_radius_ft ?? "");
   const [counters, setCounters] = useState<TokenCounter[]>([]);
+  const [lootResult, setLootResult] = useState<LootResult | null>(null);
+  const [rollingLoot, setRollingLoot] = useState(false);
+
+  // Only meaningful for a token spawned from the encounter builder (monster_cr set at spawn
+  // time, see supabase/migrations/0022_token_monster_ref.sql) — a manually-dropped asset/prop
+  // token has no CR to roll treasure against.
+  async function handleLoot() {
+    if (!token.monster_cr) return;
+    setRollingLoot(true);
+    try {
+      setLootResult(await rollLoot(token.monster_cr, "individual"));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't roll loot");
+    } finally {
+      setRollingLoot(false);
+    }
+  }
 
   async function update(patch: TokenUpdate) {
     const { error } = await room.supabase
@@ -2656,6 +2675,44 @@ function TokenInspector({
             Add to combat
           </button>
         ))}
+
+      {token.monster_cr && (
+        <div className="mb-2">
+          <button
+            type="button"
+            onClick={handleLoot}
+            disabled={rollingLoot}
+            className="w-full rounded border border-amber-700 px-2 py-1 text-xs text-amber-300 hover:bg-amber-900/30 disabled:opacity-50"
+          >
+            🎲 {rollingLoot ? "Rolling…" : "Loot"}
+          </button>
+          {lootResult && (
+            <div className="mt-1 space-y-0.5 rounded border border-neutral-800 bg-neutral-950 p-2 text-xs text-neutral-300">
+              {Object.keys(lootResult.coins).length === 0 &&
+              lootResult.gems.length === 0 &&
+              lootResult.artObjects.length === 0 &&
+              lootResult.magicItems.length === 0 ? (
+                <p className="text-neutral-500">Nothing.</p>
+              ) : (
+                <>
+                  {Object.keys(lootResult.coins).length > 0 && (
+                    <p>
+                      {Object.entries(lootResult.coins)
+                        .map(([denom, amount]) => `${amount} ${denom}`)
+                        .join(", ")}
+                    </p>
+                  )}
+                  {[...lootResult.gems, ...lootResult.artObjects, ...lootResult.magicItems].map(
+                    (line, i) => (
+                      <p key={i}>{stripTags(line)}</p>
+                    ),
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <button
         onClick={async () => {

@@ -1,6 +1,9 @@
 import type {
   AdventureIndexEntry,
   AdventureSection,
+  EncounterShapeEntry,
+  LegendaryGroupEntry,
+  LootTables,
   ReferenceDetail,
   ReferenceIndexEntry,
 } from "@/lib/reference/types";
@@ -48,12 +51,21 @@ function loadBook(file: string): Promise<Record<string, unknown[]>> {
  * `entries` in the index (that file is tiny) — no fetch. Monster/spell entries only carry
  * name/source/file, so this fetches (or reuses the cached) book file and picks the matching row.
  */
+// Which array a given index entry's book file keys its rows under. Almost always the type name
+// itself (monster/spell/trap/hazard/object) — the one exception is "item", which is split across
+// two source files with different array names (items.json's `item` vs items-base.json's
+// `baseitem`), told apart by the entry's own `file` pointer.
+function bookKeyForEntry(entry: ReferenceIndexEntry): string {
+  if (entry.type === "item") return entry.file.endsWith("items-base.json") ? "baseitem" : "item";
+  return entry.type;
+}
+
 export async function loadReferenceDetail(entry: ReferenceIndexEntry): Promise<ReferenceDetail> {
   if (entry.type === "condition" || entry.type === "disease" || entry.type === "status") {
     return entry as unknown as ReferenceDetail;
   }
   const book = await loadBook(entry.file);
-  const key = entry.type === "monster" ? "monster" : "spell";
+  const key = bookKeyForEntry(entry);
   const rows = book[key] ?? [];
   const found = rows.find(
     (r) => (r as { name?: string }).name === entry.name && (r as { source?: string }).source === entry.source,
@@ -96,4 +108,54 @@ function loadAdventureFile(file: string): Promise<AdventureSection[]> {
 /** All of one adventure's top-level chapters/sections, in book order. */
 export function loadAdventure(entry: AdventureIndexEntry): Promise<AdventureSection[]> {
   return loadAdventureFile(entry.file);
+}
+
+// legendarygroups.json / loot.json / encounterbuilder.json are lookup/rules tables, not
+// name-searchable content — a DM doesn't search the bestiary for "legendary group" or "loot
+// table" — so they get their own small cached fetch, not an entry in reference-index.json.
+
+let legendaryGroupsPromise: Promise<LegendaryGroupEntry[]> | null = null;
+
+export function loadLegendaryGroups(): Promise<LegendaryGroupEntry[]> {
+  if (!legendaryGroupsPromise) {
+    legendaryGroupsPromise = fetch(RAW_BASE + "bestiary/legendarygroups.json").then((r) => {
+      if (!r.ok) throw new Error(`Failed to load legendary groups: ${r.status}`);
+      return r.json().then((j) => j.legendaryGroup ?? []);
+    });
+  }
+  return legendaryGroupsPromise;
+}
+
+export async function findLegendaryGroup(
+  name: string,
+  source: string,
+): Promise<LegendaryGroupEntry | null> {
+  const groups = await loadLegendaryGroups();
+  return groups.find((g) => g.name === name && g.source === source) ?? null;
+}
+
+let lootTablesPromise: Promise<LootTables> | null = null;
+
+/** The DMG's Individual/Hoard treasure tables, keyed by CR bracket. */
+export function loadLootTables(): Promise<LootTables> {
+  if (!lootTablesPromise) {
+    lootTablesPromise = fetch(RAW_BASE + "loot.json").then((r) => {
+      if (!r.ok) throw new Error(`Failed to load loot tables: ${r.status}`);
+      return r.json();
+    });
+  }
+  return lootTablesPromise;
+}
+
+let encounterShapesPromise: Promise<EncounterShapeEntry[]> | null = null;
+
+/** 5etools' own encounter-shape templates ("Boss", "Boss with Minions", "Horde", ...). */
+export function loadEncounterShapes(): Promise<EncounterShapeEntry[]> {
+  if (!encounterShapesPromise) {
+    encounterShapesPromise = fetch(RAW_BASE + "encounterbuilder.json").then((r) => {
+      if (!r.ok) throw new Error(`Failed to load encounter shapes: ${r.status}`);
+      return r.json().then((j) => j.encounterShape ?? []);
+    });
+  }
+  return encounterShapesPromise;
 }
