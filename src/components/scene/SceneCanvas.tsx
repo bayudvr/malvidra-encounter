@@ -268,6 +268,23 @@ export function SceneCanvas({
   } | null>(null);
   const aoeDrawing = useRef(false);
 
+  // AOE is drawn live for everyone in the room (not just the drawer) — broadcast-only, same
+  // ephemeral pattern as the cast-viewport channel below: nothing is written to the DB, it's
+  // just relayed to whoever's connected right now. Keyed by userId so more than one person
+  // drawing at once doesn't clobber each other's shape.
+  const [remoteAoes, setRemoteAoes] = useState<
+    Map<
+      string,
+      {
+        authorName: string;
+        mode: "cone" | "line" | "cube" | "circle";
+        aoe: { originX: number; originY: number; x: number; y: number };
+        lineWidthFt: number;
+      }
+    >
+  >(new Map());
+  const aoeChannelRef = useRef<RealtimeChannel | null>(null);
+
   const [mapImage] = useImage(scene.map_url);
 
   // Reset selection and any in-progress map tool when scene changes
@@ -426,6 +443,86 @@ export function SceneCanvas({
     return () => clearTimeout(id);
   }, [castMode, isDM, view, scene.id]);
 
+  // --- AOE broadcast --------------------------------------------------------
+  // Everyone (not just the DM) opens this — AOE is a player tool too. Ephemeral only, like the
+  // cast channel above: nothing is written to the DB, so a late joiner just doesn't see a
+  // template someone else is mid-drag on until the next update tick.
+  useEffect(() => {
+    if (castMode) return;
+    const channel = room.supabase.channel(`aoe:${scene.room_id}`, {
+      config: { broadcast: { self: false } },
+    });
+    aoeChannelRef.current = channel;
+
+    channel.on("broadcast", { event: "update" }, ({ payload }) => {
+      const p = payload as {
+        userId: string;
+        authorName: string;
+        sceneId: string;
+        mode: "cone" | "line" | "cube" | "circle";
+        aoe: { originX: number; originY: number; x: number; y: number };
+        lineWidthFt: number;
+      };
+      if (p.sceneId !== scene.id) return;
+      setRemoteAoes((m) => {
+        const next = new Map(m);
+        next.set(p.userId, {
+          authorName: p.authorName,
+          mode: p.mode,
+          aoe: p.aoe,
+          lineWidthFt: p.lineWidthFt,
+        });
+        return next;
+      });
+    });
+    channel.on("broadcast", { event: "clear" }, ({ payload }) => {
+      const { userId } = payload as { userId: string };
+      setRemoteAoes((m) => {
+        if (!m.has(userId)) return m;
+        const next = new Map(m);
+        next.delete(userId);
+        return next;
+      });
+    });
+    channel.subscribe();
+
+    return () => {
+      aoeChannelRef.current = null;
+      setRemoteAoes(new Map());
+      room.supabase.removeChannel(channel);
+    };
+  }, [castMode, room.supabase, scene.room_id, scene.id]);
+
+  const actorDisplayName =
+    room.members.find((m) => m.user_id === room.userId)?.display_name ?? "Someone";
+
+  function broadcastAoe(
+    mode: "cone" | "line" | "cube" | "circle",
+    shape: { originX: number; originY: number; x: number; y: number },
+    lineWidthFt: number,
+  ) {
+    aoeChannelRef.current?.send({
+      type: "broadcast",
+      event: "update",
+      payload: {
+        userId: room.userId,
+        authorName: actorDisplayName,
+        sceneId: scene.id,
+        mode,
+        aoe: shape,
+        lineWidthFt,
+      },
+    });
+  }
+
+  function broadcastAoeClear() {
+    aoeChannelRef.current?.send({
+      type: "broadcast",
+      event: "clear",
+      payload: { userId: room.userId },
+    });
+  }
+
   const bounds = useMemo(() => {
     if (mapImage) return { w: mapImage.width, h: mapImage.height };
     return { w: scene.grid_size * 30, h: scene.grid_size * 20 };
@@ -516,6 +613,7 @@ export function SceneCanvas({
     setAoeMenu(false);
     aoeDrawing.current = false;
     setAoe(null);
+    broadcastAoeClear();
   }
 
   // Pinch-to-zoom (two-finger) on touch devices.
@@ -585,7 +683,9 @@ export function SceneCanvas({
       if (!raw) return;
       const p = snapToCell(raw);
       aoeDrawing.current = true;
-      setAoe({ originX: p.x, originY: p.y, x: p.x, y: p.y });
+      const shape = { originX: p.x, originY: p.y, x: p.x, y: p.y };
+      setAoe(shape);
+      broadcastAoe(aoeMode, shape, aoeLineWidthFt);
       return;
     }
     if (measuring) {
@@ -635,7 +735,12 @@ export function SceneCanvas({
       const raw = worldPointer(e);
       if (raw) {
         const p = snapToCell(raw);
-        setAoe((a) => (a ? { ...a, x: p.x, y: p.y } : a));
+        setAoe((a) => {
+          if (!a) return a;
+          const next = { ...a, x: p.x, y: p.y };
+          broadcastAoe(aoeMode, next, aoeLineWidthFt);
+          return next;
+        });
       }
       return;
     }
@@ -1655,6 +1760,31 @@ export function SceneCanvas({
             />
           </Layer>
         )}
+
+        {remoteAoes.size > 0 && (
+          <Layer listening={false}>
+            {[...remoteAoes.entries()].map(([userId, r]) => (
+              <Group key={userId}>
+                <AoeShape
+                  mode={r.mode}
+                  aoe={r.aoe}
+                  lineWidthPx={(r.lineWidthFt / scene.feet_per_square) * scene.grid_size}
+                  feetFromPixels={feetFromPixels}
+                  viewScale={view.scale}
+                />
+                <Text
+                  text={r.authorName}
+                  x={r.aoe.originX}
+                  y={r.aoe.originY - 16 / view.scale}
+                  fontSize={11 / view.scale}
+                  fontStyle="bold"
+                  fill="#f59e0b"
+                  listening={false}
+                />
+              </Group>
+            ))}
+          </Layer>
+        )}
       </Stage>
 
       {!castMode && (
@@ -2470,7 +2600,8 @@ function TokenInspector({
             <input
               type="number"
               value={c.current}
-              onChange={(e) => commitCounter(c.id, { current: Number(e.target.value) })}
+              onChange={(e) => setCounterLocal(c.id, { current: Number(e.target.value) })}
+              onBlur={(e) => commitCounter(c.id, { current: Number(e.target.value) })}
               className="w-8 rounded border border-neutral-700 bg-neutral-950 px-0.5 py-0.5 text-center text-xs text-neutral-200"
             />
             <span className="text-xs text-neutral-500">/</span>

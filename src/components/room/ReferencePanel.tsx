@@ -18,6 +18,7 @@ import type {
   ReferenceIndexEntry,
 } from "@/lib/reference/types";
 import { Entries, stripTags } from "@/lib/reference/render";
+import { FloatingPanel } from "@/components/room/FloatingPanel";
 
 const MAX_RESULTS = 30;
 const ABILS = ["str", "dex", "con", "int", "wis", "cha"] as const;
@@ -314,7 +315,7 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
   if (!isDM) return null;
 
   return (
-    <div className="relative">
+    <>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -324,9 +325,16 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 flex h-[28rem] w-[26rem] flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-xl">
-          <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <div className="flex gap-1 text-xs">
+        <FloatingPanel
+          title="5e Reference"
+          onClose={() => setOpen(false)}
+          defaultX={120}
+          defaultY={72}
+          defaultWidth={480}
+          defaultHeight={450}
+        >
+          <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex gap-1 border-b border-neutral-800 px-2 py-1.5 text-xs">
               <button
                 type="button"
                 onClick={() => setTab("search")}
@@ -348,15 +356,6 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
               >
                 Adventures
               </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="text-neutral-500 hover:text-neutral-200"
-              aria-label="Close"
-            >
-              ✕
-            </button>
           </div>
 
           <div className="flex flex-1 overflow-hidden">
@@ -531,8 +530,9 @@ export function ReferencePanel({ room, isDM }: { room: RoomStore; isDM: boolean 
             </div>
             )}
           </div>
-        </div>
+          </div>
+        </FloatingPanel>
       )}
-    </div>
+    </>
   );
 }

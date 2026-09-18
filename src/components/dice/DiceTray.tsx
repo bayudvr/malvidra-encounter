@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type DiceBox from "@3d-dice/dice-box";
 import DiceParser from "@3d-dice/dice-parser-interface";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
@@ -55,6 +56,7 @@ type RollRow = {
 };
 
 type AdvMode = "normal" | "adv" | "dis";
+type RollVisibility = "public" | "dm" | "self";
 
 // Roll20-syntax notation (understood by @3d-dice/dice-parser-interface):
 // advantage/disadvantage is "2d20kh1" / "2d20kl1" — roll 2, keep the
@@ -107,8 +109,10 @@ export function DiceTray({ room }: { room: RoomStore }) {
   const [pool, setPool] = useState<Record<number, number>>({});
   const [modifier, setModifier] = useState(0);
   const [advMode, setAdvMode] = useState<AdvMode>("normal");
+  const [visibility, setVisibility] = useState<RollVisibility>("public");
   const [rolling, setRolling] = useState(false);
   const [log, setLog] = useState<RollRow[]>([]);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   const boxRef = useRef<DiceBox | null>(null);
   const loadingRef = useRef(false);
@@ -209,10 +213,29 @@ export function DiceTray({ room }: { room: RoomStore }) {
           }
         },
       )
+      // "DM roll" — never written to dice_rolls (that's the shared, permanent log; a private
+      // roll must never land there), so it can only reach the DM as a live broadcast. NOTE:
+      // this is a soft/informal privacy boundary, not a real access-control one — every room
+      // member's client technically receives this broadcast (Realtime channels aren't scoped
+      // per-role the way postgres_changes + RLS is), it's just that only a DM-role client acts
+      // on it. Fine for "hide this from casual view during play", not a security guarantee.
+      .on("broadcast", { event: "private-roll" }, ({ payload }) => {
+        if (room.role !== "dm") return;
+        const p = payload as {
+          fromUserId: string;
+          actorName: string;
+          notation: string;
+          total: number;
+        };
+        if (p.fromUserId === room.userId) return; // DM rolling for themself — already shown locally.
+        toast.info(`🎲🔒 ${p.actorName} (private): ${p.notation} = ${p.total}`);
+      })
       .subscribe();
+    channelRef.current = channel;
 
     return () => {
       active = false;
+      channelRef.current = null;
       room.supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -289,15 +312,34 @@ export function DiceTray({ room }: { room: RoomStore }) {
         room.members.find((m) => m.user_id === room.userId)?.display_name ??
         "Someone";
 
-      const { error } = await room.supabase.from("dice_rolls").insert({
-        room_id: room.room!.id,
-        user_id: room.userId,
-        actor_name: actorName,
-        notation,
-        detail,
-        total,
-      });
-      if (error) toast.error(error.message);
+      // Only a public roll ever touches the shared/permanent log (dice_rolls) — "DM roll" and
+      // "self roll" are relayed live (or, for self, not relayed at all) and never written
+      // anywhere, per the ask: "yang masuk log cuma yang publik aja".
+      if (visibility === "public") {
+        const { error } = await room.supabase.from("dice_rolls").insert({
+          room_id: room.room!.id,
+          user_id: room.userId,
+          actor_name: actorName,
+          notation,
+          detail,
+          total,
+        });
+        if (error) toast.error(error.message);
+      } else if (visibility === "dm") {
+        if (room.role === "dm") {
+          // The DM rolling "privately" has no one else to hide it from — just their own toast.
+          toast.info(`🔒 ${notation} = ${total}`);
+        } else {
+          channelRef.current?.send({
+            type: "broadcast",
+            event: "private-roll",
+            payload: { fromUserId: room.userId, actorName, notation, total },
+          });
+          toast.info(`Sent privately to the DM: ${notation} = ${total}`);
+        }
+      } else {
+        toast.info(`🔒 ${notation} = ${total}`);
+      }
     } catch {
       toast.error("Roll failed");
     } finally {
@@ -451,6 +493,32 @@ export function DiceTray({ room }: { room: RoomStore }) {
                 >
                   +
                 </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-neutral-400">Visible to</span>
+              <div className="flex gap-1">
+                {(
+                  [
+                    ["public", "Public"],
+                    ["dm", "DM"],
+                    ["self", "Self"],
+                  ] as const
+                ).map(([v, label]) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setVisibility(v)}
+                    className={`rounded px-2 py-1 text-xs font-semibold ${
+                      visibility === v
+                        ? "bg-amber-500 text-neutral-950"
+                        : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 

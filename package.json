@@ -20,6 +20,7 @@
     "react-dom": "19.2.8",
     "react-konva": "^19.2.5",
     "react-markdown": "^10.1.0",
+    "react-rnd": "^10.5.3",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {

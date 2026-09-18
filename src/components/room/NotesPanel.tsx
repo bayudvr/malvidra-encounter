@@ -8,6 +8,7 @@ import type { Components } from "react-markdown";
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { DmNotes } from "@/lib/room/types";
+import { FloatingPanel } from "@/components/room/FloatingPanel";
 
 const AUTOSAVE_DELAY_MS = 1200;
 
@@ -149,7 +150,7 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
   if (!isDM) return null;
 
   return (
-    <div className="relative">
+    <>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -159,21 +160,14 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 flex h-[28rem] w-[26rem] flex-col overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 shadow-xl">
-          <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-            <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-              Notes
-            </span>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="text-neutral-500 hover:text-neutral-200"
-              aria-label="Close"
-            >
-              ✕
-            </button>
-          </div>
-
+        <FloatingPanel
+          title="Notes"
+          onClose={() => setOpen(false)}
+          defaultX={80}
+          defaultY={72}
+          defaultWidth={420}
+          defaultHeight={380}
+        >
           <div className="flex flex-1 overflow-hidden">
             <div className="flex w-32 shrink-0 flex-col overflow-y-auto border-r border-neutral-800">
               <button
@@ -284,8 +278,8 @@ export function NotesPanel({ room, isDM }: { room: RoomStore; isDM: boolean }) {
               )}
             </div>
           </div>
-        </div>
+        </FloatingPanel>
       )}
-    </div>
+    </>
   );
 }
