@@ -97,30 +97,55 @@ export function RoomView({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {isDM && scene && <ModeToggle room={room} scene={scene} />}
-          {isDM && <NotesPanel room={room} isDM={isDM} />}
-          {isDM && <ReferencePanel room={room} isDM={isDM} />}
-          {isDM && <EncounterBuilderPanel room={room} isDM={isDM} />}
+        {/* This row keeps growing (ModeToggle, Notes, 5e Reference, Encounter Builder, Cast,
+            Player Requests, + a combat-only Combatants toggle) — shrink-0 with no wrap/scroll
+            meant it just overflowed off-screen on a phone once there were enough DM buttons to
+            not fit, crushing/hiding whatever it could of the room name on the left instead of
+            reflowing. Capped + internally scrollable on narrow screens; back to the untouched
+            fixed-width row from sm: up. */}
+        <div className="flex max-w-[60vw] shrink items-center gap-1.5 overflow-x-auto sm:max-w-none sm:shrink-0 sm:gap-2">
+          {/* Each button wrapped in its own shrink-0 span — otherwise the flex children would
+              squeeze/wrap their own labels to fit instead of the row just scrolling. */}
+          {isDM && scene && (
+            <span className="shrink-0">
+              <ModeToggle room={room} scene={scene} />
+            </span>
+          )}
           {isDM && (
-            <CastControls
-              roomId={roomId}
-              castToken={room.room?.cast_token}
-            />
+            <span className="shrink-0">
+              <NotesPanel room={room} isDM={isDM} />
+            </span>
+          )}
+          {isDM && (
+            <span className="shrink-0">
+              <ReferencePanel room={room} isDM={isDM} />
+            </span>
+          )}
+          {isDM && (
+            <span className="shrink-0">
+              <EncounterBuilderPanel room={room} isDM={isDM} />
+            </span>
+          )}
+          {isDM && (
+            <span className="shrink-0">
+              <CastControls roomId={roomId} castToken={room.room?.cast_token} />
+            </span>
           )}
           {!isDM && (
-            <span className="hidden text-xs text-sky-300 sm:inline">
+            <span className="hidden shrink-0 text-xs text-sky-300 sm:inline">
               Player view
             </span>
           )}
-          <PlayerRequests room={room} isDM={isDM} />
+          <span className="shrink-0">
+            <PlayerRequests room={room} isDM={isDM} />
+          </span>
           {inCombat && isDM && (
             <button
               type="button"
               onClick={() =>
                 setDrawer((d) => (d === "initiative" ? null : "initiative"))
               }
-              className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 lg:hidden"
+              className="shrink-0 rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 lg:hidden"
             >
               Combatants
             </button>

@@ -1295,7 +1295,6 @@ export function SceneCanvas({
       });
   }, [room.tokens, visionOccluders, scene.fog_enabled, scene.feet_per_square, scene.grid_size]);
 
-  const inCombat = scene.mode === "combat";
   const combatantByToken = useMemo(() => {
     const map = new Map<string, Combatant>();
     for (const c of room.combatants) if (c.token_id) map.set(c.token_id, c);
@@ -1384,9 +1383,11 @@ export function SceneCanvas({
             .filter((t) => isDM || !t.is_hidden)
             .map((t) => {
               const owned = t.owner_user_id === room.userId;
-              const combatant = inCombat
-                ? (combatantByToken.get(t.id) ?? null)
-                : null;
+              // Not gated on inCombat: seed_scene_combatants (0002/0015) deliberately keeps a
+              // token's combatant row across an End Combat toggle ("without losing initiative or
+              // HP") specifically so a downed/wounded look still shows afterward — only "Reset
+              // combat" (InitiativeTracker) actually clears it.
+              const combatant = combatantByToken.get(t.id) ?? null;
               return (
                 <TokenSprite
                   key={t.id}
