@@ -249,6 +249,12 @@ export function EncounterBuilderPanel({ room, isDM }: { room: RoomStore; isDM: b
         monster_cr: inst.entry.cr != null ? String(inst.entry.cr) : null,
       }));
 
+      // Tokens only — deliberately NOT auto-added to the initiative tracker here. Combat's
+      // InitiativeBar is visible to every player, so pre-adding a hidden ambush would spoil it
+      // the instant combat starts, regardless of the token still being hidden on the map (same
+      // reasoning as seed_scene_combatants skipping hidden tokens, see migration 0023). The DM
+      // adds these to combat once revealed, via the existing per-token/multi-select "Add to
+      // combat" action, or by starting combat after unhiding them.
       const { data: insertedTokens, error: tokenError } = await room.supabase
         .from("tokens")
         .insert(tokensToInsert)
@@ -256,22 +262,6 @@ export function EncounterBuilderPanel({ room, isDM }: { room: RoomStore; isDM: b
       if (tokenError || !insertedTokens) {
         return toast.error(tokenError?.message ?? "Couldn't add tokens");
       }
-
-      const base = room.combatants.length;
-      const { error: combatantError } = await room.supabase.from("combatants").insert(
-        insertedTokens.map((t, i) => ({
-          scene_id: t.scene_id,
-          room_id: t.room_id,
-          name: t.label,
-          is_player: false,
-          token_id: t.id,
-          sort_order: base + i,
-          hp: t.hp,
-          max_hp: t.hp,
-          ac: t.ac,
-        })),
-      );
-      if (combatantError) toast.error(combatantError.message);
 
       room.reloadScene();
       setPicks([]);
