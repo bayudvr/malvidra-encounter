@@ -1,7 +1,8 @@
 "use client";
 
-import { Arc, Circle, Group, Rect, Text } from "react-konva";
-import type Konva from "konva";
+import { useEffect, useRef } from "react";
+import { Arc, Circle, Group, Line, Rect, Text } from "react-konva";
+import Konva from "konva";
 
 import { useImage } from "@/lib/useImage";
 import { colorFromString, tokenInitials } from "@/lib/utils";
@@ -14,6 +15,20 @@ function hpColor(ratio: number) {
   return "#f87171";
 }
 
+// Rough char-width estimate for a 13px sans body font — good enough to size
+// the bubble without pulling in real text-metrics measurement.
+const BUBBLE_FONT_SIZE = 13;
+const BUBBLE_CHAR_WIDTH = BUBBLE_FONT_SIZE * 0.55;
+const BUBBLE_MAX_WIDTH = 220;
+const BUBBLE_PADDING_X = 10;
+const BUBBLE_PADDING_Y = 8;
+const BUBBLE_LINE_HEIGHT = 16;
+
+function estimateBubbleLines(text: string): number {
+  const charsPerLine = Math.max(1, Math.floor((BUBBLE_MAX_WIDTH - BUBBLE_PADDING_X * 2) / BUBBLE_CHAR_WIDTH));
+  return Math.max(1, Math.ceil(text.length / charsPerLine));
+}
+
 export function TokenSprite({
   token,
   gridSize,
@@ -22,6 +37,8 @@ export function TokenSprite({
   selected,
   combatant,
   revealStats,
+  speechText,
+  remotePos,
   onDragStart,
   onDragMove,
   onDragEnd,
@@ -36,6 +53,14 @@ export function TokenSprite({
   combatant?: Combatant | null;
   /** Whether this viewer may see the combatant's HP / AC numbers. */
   revealStats?: boolean;
+  /** Most recent still-active chat message spoken as this token, if any (SceneCanvas decides the expiry window). */
+  speechText?: string | null;
+  /**
+   * Live position while someone else is dragging this token (broadcast, not yet in the DB).
+   * The node glides toward it between the throttled updates; `null` glides back to
+   * token.x/y, the dragger's final position once the drag ends.
+   */
+  remotePos?: { x: number; y: number } | null;
   onDragStart?: (e: Konva.KonvaEventObject<DragEvent>) => void;
   /**
    * Called on every drag tick with the node's current (world) position.
@@ -48,6 +73,27 @@ export function TokenSprite({
   onSelect: (e?: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
 }) {
   const [image] = useImage(token.image_url);
+  const groupRef = useRef<Konva.Group>(null);
+  const glideRef = useRef<Konva.Tween | null>(null);
+  const gliding = useRef(false);
+
+  // Only runs while a remote drag is (or just was) active — otherwise the Group's x/y props
+  // position the node as usual. The null step matters when the drag ends where it started
+  // (e.g. blocked by a wall): token.x/y didn't change, so react-konva won't move the node back.
+  const targetX = remotePos ? remotePos.x : token.x;
+  const targetY = remotePos ? remotePos.y : token.y;
+  useEffect(() => {
+    const node = groupRef.current;
+    if (!node || node.isDragging()) return;
+    if (!remotePos && !gliding.current) return;
+    gliding.current = !!remotePos;
+    glideRef.current?.destroy();
+    const tween = new Konva.Tween({ node, x: targetX, y: targetY, duration: 0.1 });
+    glideRef.current = tween;
+    tween.play();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- remotePos is tracked via targetX/Y
+  }, [targetX, targetY, !!remotePos]);
+  useEffect(() => () => glideRef.current?.destroy(), []);
   const radius = (token.size * gridSize) / 2;
   const tint = token.color ?? colorFromString(token.label);
 
@@ -79,6 +125,7 @@ export function TokenSprite({
 
   return (
     <Group
+      ref={groupRef}
       id={token.id}
       x={token.x}
       y={token.y}
@@ -173,6 +220,51 @@ export function TokenSprite({
           listening={false}
         />
       )}
+
+      {speechText &&
+        (() => {
+          const lines = estimateBubbleLines(speechText);
+          const width = Math.min(
+            BUBBLE_MAX_WIDTH,
+            Math.max(60, speechText.length * BUBBLE_CHAR_WIDTH + BUBBLE_PADDING_X * 2),
+          );
+          const height = lines * BUBBLE_LINE_HEIGHT + BUBBLE_PADDING_Y * 2;
+          // Sits above the condition-code row when present, otherwise just above the sprite.
+          const bottomY = -(radius + (conditions.length > 0 ? 44 : 14));
+          const topY = bottomY - height;
+          return (
+            <Group listening={false}>
+              <Rect
+                x={-width / 2}
+                y={topY}
+                width={width}
+                height={height}
+                cornerRadius={8}
+                fill="#18181b"
+                stroke="#52525b"
+                strokeWidth={1}
+              />
+              <Text
+                x={-width / 2 + BUBBLE_PADDING_X}
+                y={topY + BUBBLE_PADDING_Y}
+                width={width - BUBBLE_PADDING_X * 2}
+                text={speechText}
+                fontSize={BUBBLE_FONT_SIZE}
+                fill="#f4f4f5"
+                align="center"
+                wrap="word"
+                lineHeight={BUBBLE_LINE_HEIGHT / BUBBLE_FONT_SIZE}
+              />
+              <Line
+                points={[-6, bottomY, 6, bottomY, 0, bottomY + 8]}
+                closed
+                fill="#18181b"
+                stroke="#52525b"
+                strokeWidth={1}
+              />
+            </Group>
+          );
+        })()}
 
       {/* Name below the token (not above) so the HP bar/stat line stack
           directly under it, all in one group below the sprite. */}

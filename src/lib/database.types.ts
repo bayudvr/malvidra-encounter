@@ -214,6 +214,27 @@ export interface Database {
         };
         Relationships: [];
       };
+      chat_messages: {
+        Row: {
+          id: string;
+          room_id: string;
+          user_id: string | null;
+          token_id: string | null;
+          speaker_name: string;
+          body: string;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          room_id: string;
+          user_id?: string | null;
+          token_id?: string | null;
+          speaker_name: string;
+          body: string;
+          created_at?: string;
+        };
+        Update: { body?: string };
+        Relationships: [];
+      };
       dice_rolls: {
         Row: {
           id: string;
@@ -352,6 +373,27 @@ export interface Database {
         Update: {
           is_open?: boolean;
         };
+        Relationships: [];
+      };
+      token_auras: {
+        Row: {
+          id: string;
+          token_id: string;
+          scene_id: string;
+          room_id: string;
+          radius_ft: number;
+          color: string;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          token_id: string;
+          scene_id: string;
+          room_id: string;
+          radius_ft?: number;
+          color?: string;
+          created_at?: string;
+        };
+        Update: { radius_ft?: number; color?: string };
         Relationships: [];
       };
       walls: {

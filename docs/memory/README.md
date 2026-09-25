@@ -10,3 +10,4 @@ files are a point-in-time snapshot and may drift — ask Claude to refresh them 
 - [Dice roller](dice-roller.md) — @3d-dice/dice-box + dice-parser-interface, adv/disadv, useToast()-in-deps bug class
 - [Discord webhooks](discord-webhooks.md) — per-room webhook security model (pg_net, DM-only table) and event triggers
 - [West Marches PBP](west-marches-pbp.md) — the user's actual campaign use case; why webhook/spotlight/your-turn exist
+- [Feature ideas 2026-09](feature-ideas-2026-09.md) — chat bubbles + circle token-auras BUILT; ccfolia research; freeform character sheet still open/undecided

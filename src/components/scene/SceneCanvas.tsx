@@ -31,6 +31,15 @@ import { TokenSprite } from "@/components/scene/TokenSprite";
 
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
+// How long a speech bubble (chat message spoken "as" a token) stays visible.
+const BUBBLE_TTL_MS = 8000;
+// Live token drag broadcast: send rate while moving, keep-alive while held still, and how
+// long a receiver keeps a remote drag with no update before assuming the dragger vanished.
+const TOKEN_DRAG_SEND_MS = 66;
+const TOKEN_DRAG_HEARTBEAT_MS = 1000;
+const TOKEN_DRAG_STALE_MS = 3000;
+// Longer than TokenSprite's glide (0.1s) so the final glide finishes before handing back.
+const TOKEN_DRAG_SETTLE_MS = 150;
 
 // Splits a trailing " <number>" off a label, e.g. "Goblin 2" -> ("Goblin", 2).
 // A label with no trailing number is its own base with an implicit 0.
@@ -202,6 +211,30 @@ export function SceneCanvas({
 }) {
   const toast = useToast();
   const isDM = room.role === "dm";
+
+  // Speech bubbles (TokenSprite) — latest still-fresh chat message spoken as
+  // each token. room.chatMessages is oldest-first and room-wide (not
+  // scene-scoped), so this naturally only surfaces tokens that exist in the
+  // currently-viewed scene; a message for a token on another scene just never
+  // matches anything here. Ticks every second purely to expire old bubbles —
+  // nothing re-renders this on its own once BUBBLE_TTL_MS has passed.
+  const [bubbleNow, setBubbleNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setBubbleNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const speechByToken = useMemo(() => {
+    const latest = new Map<string, { body: string; createdAt: number }>();
+    for (const m of room.chatMessages) {
+      if (!m.token_id) continue;
+      latest.set(m.token_id, { body: m.body, createdAt: new Date(m.created_at).getTime() });
+    }
+    const active = new Map<string, string>();
+    for (const [tokenId, msg] of latest) {
+      if (bubbleNow - msg.createdAt < BUBBLE_TTL_MS) active.set(tokenId, msg.body);
+    }
+    return active;
+  }, [room.chatMessages, bubbleNow]);
   const wrapRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -494,6 +527,140 @@ export function SceneCanvas({
       room.supabase.removeChannel(channel);
     };
   }, [castMode, room.supabase, scene.room_id, scene.id]);
+
+  // --- Live token drag ------------------------------------------------------
+  // Everyone else sees a token move while it's being dragged instead of jumping on drop.
+  // Ephemeral like AOE: the DB write still only happens on drop (moveToken /
+  // commitMultiMove), which also sends `end` with the final spot. Broadcast bypasses RLS, so
+  // hidden tokens are never sent. Cast screens listen too (no castMode guard).
+  const [remoteDrags, setRemoteDrags] = useState<
+    Map<string, { x: number; y: number; at: number }>
+  >(new Map());
+  const tokenDragChannelRef = useRef<RealtimeChannel | null>(null);
+  // This client's in-flight drag: latest position per token, flushed on a fixed interval.
+  const dragOutbox = useRef<Map<string, Pt>>(new Map());
+  const dragDirty = useRef(false);
+  const dragLastSent = useRef(0);
+  const dragTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const patchTokenLocal = room.patchTokenLocal;
+
+  useEffect(() => {
+    const channel = room.supabase.channel(`token-drag:${scene.room_id}`, {
+      config: { broadcast: { self: false } },
+    });
+    tokenDragChannelRef.current = channel;
+    type DragPayload = {
+      sceneId: string;
+      tokens: { id: string; x: number; y: number }[];
+    };
+
+    channel.on("broadcast", { event: "move" }, ({ payload }) => {
+      const p = payload as DragPayload;
+      if (p.sceneId !== scene.id) return;
+      const at = Date.now();
+      setRemoteDrags((m) => {
+        const next = new Map(m);
+        for (const t of p.tokens) next.set(t.id, { x: t.x, y: t.y, at });
+        return next;
+      });
+    });
+    channel.on("broadcast", { event: "end" }, ({ payload }) => {
+      const p = payload as DragPayload;
+      if (p.sceneId !== scene.id) return;
+      // Glide to the final spot as one last remote position, then hand the token back to
+      // room state with that spot applied — without waiting on the DB round-trip. Patching
+      // straight away would have react-konva set x/y before TokenSprite can tween (a jump).
+      const at = Date.now();
+      setRemoteDrags((m) => {
+        const next = new Map(m);
+        for (const t of p.tokens) next.set(t.id, { x: t.x, y: t.y, at });
+        return next;
+      });
+      setTimeout(() => {
+        for (const t of p.tokens) patchTokenLocal(t.id, { x: t.x, y: t.y });
+        setRemoteDrags((m) => {
+          const next = new Map(m);
+          // A new drag of the same token may have started meanwhile — leave that one.
+          for (const t of p.tokens)
+            if (next.get(t.id)?.at === at) next.delete(t.id);
+          return next;
+        });
+      }, TOKEN_DRAG_SETTLE_MS);
+    });
+    channel.subscribe();
+
+    // Dragger closed the tab / lost connection mid-drag: no `end` is coming.
+    const sweep = setInterval(() => {
+      const cutoff = Date.now() - TOKEN_DRAG_STALE_MS;
+      setRemoteDrags((m) => {
+        if (![...m.values()].some((d) => d.at < cutoff)) return m;
+        return new Map([...m].filter(([, d]) => d.at >= cutoff));
+      });
+    }, 1000);
+
+    return () => {
+      clearInterval(sweep);
+      tokenDragChannelRef.current = null;
+      setRemoteDrags(new Map());
+      room.supabase.removeChannel(channel);
+    };
+  }, [room.supabase, patchTokenLocal, scene.room_id, scene.id]);
+
+  useEffect(
+    () => () => {
+      if (dragTimer.current) clearInterval(dragTimer.current);
+    },
+    [],
+  );
+
+  function startDragBroadcast() {
+    dragOutbox.current = new Map();
+    dragDirty.current = false;
+    dragLastSent.current = 0;
+    if (dragTimer.current) clearInterval(dragTimer.current);
+    const sceneId = scene.id;
+    dragTimer.current = setInterval(() => {
+      const outbox = dragOutbox.current;
+      if (!outbox.size) return;
+      const now = Date.now();
+      if (
+        !dragDirty.current &&
+        now - dragLastSent.current < TOKEN_DRAG_HEARTBEAT_MS
+      )
+        return;
+      dragDirty.current = false;
+      dragLastSent.current = now;
+      tokenDragChannelRef.current?.send({
+        type: "broadcast",
+        event: "move",
+        payload: {
+          sceneId,
+          tokens: Array.from(outbox, ([id, p]) => ({ id, ...p })),
+        },
+      });
+    }, TOKEN_DRAG_SEND_MS);
+  }
+
+  function queueDragPosition(id: string, pos: Pt) {
+    if (room.tokens.find((t) => t.id === id)?.is_hidden) return;
+    dragOutbox.current.set(id, { x: pos.x, y: pos.y });
+    dragDirty.current = true;
+  }
+
+  function endDragBroadcast(finals: { id: string; x: number; y: number }[]) {
+    if (dragTimer.current) clearInterval(dragTimer.current);
+    dragTimer.current = null;
+    const sent = dragOutbox.current;
+    dragOutbox.current = new Map();
+    // Only tokens receivers actually saw moving — a hidden one never went out.
+    const tokens = finals.filter((f) => sent.has(f.id));
+    if (!tokens.length) return;
+    tokenDragChannelRef.current?.send({
+      type: "broadcast",
+      event: "end",
+      payload: { sceneId: scene.id, tokens },
+    });
+  }
 
   const actorDisplayName =
     room.members.find((m) => m.user_id === room.userId)?.display_name ?? "Someone";
@@ -867,16 +1034,21 @@ export function SceneCanvas({
         // Snap it back — the visual drag already moved it, so without this
         // patch it'd stay wherever the drag dropped it.
         room.patchTokenLocal(id, from);
+        endDragBroadcast([{ id, ...from }]);
         toast.error("Blocked by a closed door");
         return;
       }
       if (crossesWall(from, to)) {
         room.patchTokenLocal(id, from);
+        endDragBroadcast([{ id, ...from }]);
         toast.error("Blocked by a wall");
         return;
       }
     }
     room.patchTokenLocal(id, { x, y });
+    endDragBroadcast([{ id, x, y }]);
+    const inserting = pendingInserts.current.get(id);
+    if (inserting && !(await inserting)) return;
     const { error } = await room.supabase
       .from("tokens")
       .update({ x, y })
@@ -890,9 +1062,13 @@ export function SceneCanvas({
   async function commitMultiMove(dx: number, dy: number) {
     const origin = multiDragRef.current;
     multiDragRef.current = null;
-    if (!origin) return;
+    if (!origin) {
+      endDragBroadcast([]);
+      return;
+    }
     const g = scene.grid_size;
     const updates: { id: string; x: number; y: number }[] = [];
+    const finals: { id: string; x: number; y: number }[] = [];
     let blocked = false;
     for (const [id, o] of origin.positions) {
       const rawX = o.x + dx;
@@ -901,6 +1077,7 @@ export function SceneCanvas({
       const to = { x: rawX, y: rawY };
       if (crossesClosedDoor(from, to) || crossesWall(from, to)) {
         room.patchTokenLocal(id, from);
+        finals.push({ id, ...from });
         blocked = true;
         continue;
       }
@@ -914,6 +1091,7 @@ export function SceneCanvas({
       room.patchTokenLocal(id, { x, y });
       updates.push({ id, x, y });
     }
+    endDragBroadcast([...finals, ...updates]);
     if (blocked) toast.error("Some tokens blocked by a closed door or wall");
     const results = await Promise.all(
       updates.map((u) =>
@@ -928,38 +1106,61 @@ export function SceneCanvas({
   // inserted at the same spot with an auto-numbered label ("Goblin" ->
   // "Goblin 1", next one "Goblin 2", ...), and the drag carries on with the
   // new token under the cursor.
-  async function duplicateToken(source: Token) {
+  // Resolves once an alt-drag duplicate's row exists (false if the insert failed) —
+  // moveToken waits on it so the drop's UPDATE can't race ahead of the INSERT.
+  const pendingInserts = useRef<Map<string, Promise<boolean>>>(new Map());
+
+  function duplicateToken(source: Token, grab: Pt | null) {
     const label = nextDuplicateLabel(source.label, room.tokens);
-    const { data, error } = await room.supabase
-      .from("tokens")
-      .insert({
-        scene_id: source.scene_id,
-        room_id: source.room_id,
-        asset_id: source.asset_id,
-        label,
-        image_url: source.image_url,
-        x: source.x,
-        y: source.y,
-        size: source.size,
-        color: source.color,
-        owner_user_id: source.owner_user_id,
-        is_hidden: source.is_hidden,
-        hp: source.hp,
-        ac: source.ac,
-      })
-      .select()
-      .single();
-    if (error || !data) {
-      toast.error(error?.message ?? "Couldn't duplicate token");
-      return;
-    }
-    room.addTokenLocal(data);
-    setSelectedIds([data.id]);
-    setRuler({ startX: data.x, startY: data.y, x: data.x, y: data.y });
-    // The new token's Group hasn't mounted yet this tick — grab it once it
-    // has so the drag continues onto it without the user releasing/re-pressing.
+    // Created locally first with a client-side id, so the drag carries on this very frame.
+    // Waiting on the INSERT let the mouse run ahead, and startDrag() then kept that gap as
+    // its grab offset — the copy trailed behind the cursor for the rest of the drag.
+    const copy: Token = { ...source, id: crypto.randomUUID(), label };
+    room.addTokenLocal(copy);
+    setSelectedIds([copy.id]);
+    setRuler({ startX: copy.x, startY: copy.y, x: copy.x, y: copy.y });
+
+    // Promise.resolve: the query builder is only a PromiseLike.
+    const insert = Promise.resolve(
+      room.supabase
+        .from("tokens")
+        .insert({
+          id: copy.id,
+          scene_id: source.scene_id,
+          room_id: source.room_id,
+          asset_id: source.asset_id,
+          label,
+          image_url: source.image_url,
+          x: source.x,
+          y: source.y,
+          size: source.size,
+          color: source.color,
+          owner_user_id: source.owner_user_id,
+          is_hidden: source.is_hidden,
+          hp: source.hp,
+          ac: source.ac,
+        })
+        .then(({ error }) => {
+          pendingInserts.current.delete(copy.id);
+          if (!error) return true;
+          room.removeTokenLocal(copy.id);
+          toast.error(error.message);
+          return false;
+        }),
+    );
+    pendingInserts.current.set(copy.id, insert);
+
+    // The copy's Group hasn't mounted yet this tick — grab it once it has, placed so the
+    // cursor holds it at the same spot it held the original.
     requestAnimationFrame(() => {
-      stageRef.current?.findOne(`#${data.id}`)?.startDrag();
+      const stage = stageRef.current;
+      const node = stage?.findOne(`#${copy.id}`);
+      const pointer = stage?.getPointerPosition();
+      if (!node) return;
+      if (grab && pointer) {
+        node.absolutePosition({ x: pointer.x - grab.x, y: pointer.y - grab.y });
+      }
+      node.startDrag();
     });
   }
 
@@ -1016,10 +1217,17 @@ export function SceneCanvas({
     e: Konva.KonvaEventObject<DragEvent>,
   ) {
     if (isDM && e.evt?.altKey) {
+      // Where on the token the cursor grabbed it, in screen px (the view's pan/zoom included).
+      const pointer = e.target.getStage()?.getPointerPosition();
+      const abs = e.target.getAbsolutePosition();
       e.target.stopDrag();
-      void duplicateToken(t);
+      duplicateToken(
+        t,
+        pointer ? { x: pointer.x - abs.x, y: pointer.y - abs.y } : null,
+      );
       return;
     }
+    startDragBroadcast();
     if (isDM && selectedIds.length > 1 && selectedIds.includes(t.id)) {
       const positions = new Map<
         string,
@@ -1379,6 +1587,28 @@ export function SceneCanvas({
         </Layer>
 
         <Layer>
+          {/* Auras render underneath tokens (painted first, same layer) and simply read the
+              token's live x/y every frame — that's the entire "follows the token" mechanism,
+              no offset tracking needed. */}
+          {room.tokenAuras.map((aura) => {
+            const token = room.tokens.find((t) => t.id === aura.token_id);
+            if (!token || (token.is_hidden && !isDM)) return null;
+            const radiusPx = (aura.radius_ft / scene.feet_per_square) * scene.grid_size;
+            const pos = remoteDrags.get(token.id) ?? token;
+            return (
+              <Circle
+                key={aura.id}
+                x={pos.x}
+                y={pos.y}
+                radius={radiusPx}
+                fill={`${aura.color}48`}
+                stroke={aura.color}
+                strokeWidth={2}
+                listening={false}
+              />
+            );
+          })}
+
           {room.tokens
             .filter((t) => isDM || !t.is_hidden)
             .map((t) => {
@@ -1406,9 +1636,14 @@ export function SceneCanvas({
                   selected={selectedIds.includes(t.id)}
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
+                  speechText={speechByToken.get(t.id) ?? null}
+                  remotePos={remoteDrags.get(t.id) ?? null}
                   onSelect={(e) => {
+                    // Non-DM selection is only meaningful for a player's own token (opens
+                    // TokenAuraPanel) — everything else here (multi-select, DM tools) stays
+                    // DM-only, same as before.
                     if (
-                      !isDM ||
+                      (!isDM && !owned) ||
                       drawingPolygon ||
                       addingDoor ||
                       drawingWall ||
@@ -1432,6 +1667,7 @@ export function SceneCanvas({
                     // through it — resolved is the raw (x, y) unless a wall
                     // crossing pinned it back to its last valid spot.
                     const resolved = resolveWallStep(t.id, x, y);
+                    queueDragPosition(t.id, resolved);
                     setRuler((r) =>
                       r ? { ...r, x: resolved.x, y: resolved.y } : r,
                     );
@@ -1447,6 +1683,7 @@ export function SceneCanvas({
                           o.y + dy,
                         );
                         room.patchTokenLocal(id, followerResolved);
+                        queueDragPosition(id, followerResolved);
                       }
                     }
                     return resolved.x === x && resolved.y === y
@@ -2101,6 +2338,15 @@ export function SceneCanvas({
         />
       )}
 
+      {!isDM && selectedToken && selectedToken.owner_user_id === room.userId && (
+        <TokenAuraPanel
+          key={selectedToken.id}
+          room={room}
+          token={selectedToken}
+          onClose={() => setSelectedIds([])}
+        />
+      )}
+
       {isDM && selectedTokens.length > 1 && (
         <MultiTokenBar
           room={room}
@@ -2244,28 +2490,28 @@ function AoeShape({
   const fill = "rgba(192,132,252,0.28)";
 
   function label(x: number, y: number, text: string) {
-    const w = 10 + text.length * 7;
+    const w = 16 + text.length * 8;
     return (
       <Group x={x} y={y} scaleX={1 / viewScale} scaleY={1 / viewScale}>
         <Rect
           x={8}
-          y={-11}
+          y={-12}
           width={w}
-          height={22}
+          height={24}
           cornerRadius={4}
-          fill="#0a0a0a"
+          fill="#000000"
           stroke={stroke}
-          strokeWidth={1}
+          strokeWidth={1.5}
         />
         <Text
           x={8}
-          y={-11}
+          y={-12}
           width={w}
-          height={22}
+          height={24}
           text={text}
-          fontSize={13}
+          fontSize={14}
           fontStyle="bold"
-          fill="#f5f5f5"
+          fill="#ffffff"
           align="center"
           verticalAlign="middle"
         />
@@ -2355,6 +2601,41 @@ function AoeShape({
   );
 }
 
+// Drag-to-move for a floating HTML panel (TokenInspector / TokenAuraPanel) — they're
+// absolute-positioned near the token toolbar and can end up covering the thing you just
+// clicked. Pointer capture means the header keeps receiving move/up events even once the
+// cursor leaves it, so no document-level listener/cleanup is needed. Resets to (0, 0)
+// (the panel's default corner) whenever `resetKey` changes — i.e. a new token selected.
+function usePanelDrag(resetKey: string) {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ startX: number; startY: number; startOffset: { x: number; y: number } } | null>(
+    null,
+  );
+
+  useEffect(() => setOffset({ x: 0, y: 0 }), [resetKey]);
+
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      dragRef.current = { startX: e.clientX, startY: e.clientY, startOffset: offset };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    [offset],
+  );
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const { startX, startY, startOffset } = dragRef.current;
+    setOffset({ x: startOffset.x + (e.clientX - startX), y: startOffset.y + (e.clientY - startY) });
+  }, []);
+  const onPointerUp = useCallback(() => {
+    dragRef.current = null;
+  }, []);
+
+  return {
+    style: { transform: `translate(${offset.x}px, ${offset.y}px)` },
+    dragHandleProps: { onPointerDown, onPointerMove, onPointerUp },
+  };
+}
+
 function TokenInspector({
   room,
   token,
@@ -2365,6 +2646,7 @@ function TokenInspector({
   onClose: () => void;
 }) {
   const toast = useToast();
+  const { style: dragStyle, dragHandleProps } = usePanelDrag(token.id);
   const [label, setLabel] = useState(token.label);
   const [hp, setHp] = useState(token.hp);
   const [ac, setAc] = useState(token.ac);
@@ -2372,6 +2654,7 @@ function TokenInspector({
   const [counters, setCounters] = useState<TokenCounter[]>([]);
   const [lootResult, setLootResult] = useState<LootResult | null>(null);
   const [rollingLoot, setRollingLoot] = useState(false);
+  const auras = room.tokenAuras.filter((a) => a.token_id === token.id);
 
   // Only meaningful for a token spawned from the encounter builder (monster_cr set at spawn
   // time, see supabase/migrations/0022_token_monster_ref.sql) — a manually-dropped asset/prop
@@ -2462,6 +2745,33 @@ function TokenInspector({
     if (error) toast.error(error.message);
   }
 
+  // Persistent circle AoE attached to this token — see supabase/migrations/0025_token_auras.sql.
+  // room.tokenAuras is already live scene-scoped state, so no separate fetch here (unlike
+  // counters, which aren't part of the central store).
+  async function addAura() {
+    const { error } = await room.supabase.from("token_auras").insert({
+      token_id: token.id,
+      scene_id: token.scene_id,
+      room_id: token.room_id,
+      radius_ft: 10,
+      color: "#c084fc",
+    });
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  async function updateAura(id: string, patch: { radius_ft?: number; color?: string }) {
+    const { error } = await room.supabase.from("token_auras").update(patch).eq("id", id);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  async function removeAura(id: string) {
+    const { error } = await room.supabase.from("token_auras").delete().eq("id", id);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
   const players = room.members.filter((m) => m.role === "player");
   const inCombat = room.activeScene?.mode === "combat";
   const existingCombatant = room.combatants.find(
@@ -2488,8 +2798,14 @@ function TokenInspector({
   }
 
   return (
-    <div className="absolute right-2 top-2 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm shadow-xl">
-      <div className="mb-2 flex items-center justify-between">
+    <div
+      style={dragStyle}
+      className="absolute right-2 top-2 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm shadow-xl"
+    >
+      <div
+        {...dragHandleProps}
+        className="mb-2 flex cursor-move touch-none items-center justify-between"
+      >
         <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
           Token
         </span>
@@ -2663,6 +2979,47 @@ function TokenInspector({
         ))}
       </div>
 
+      <div className="mb-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-neutral-500">Aura</span>
+          <button
+            type="button"
+            onClick={addAura}
+            className="text-xs text-amber-300 hover:text-amber-200"
+          >
+            + Add
+          </button>
+        </div>
+        {auras.map((a) => (
+          <div key={a.id} className="mb-1 flex items-center gap-1">
+            <input
+              type="color"
+              value={a.color}
+              onChange={(e) => updateAura(a.id, { color: e.target.value })}
+              className="h-6 w-6 shrink-0 rounded border border-neutral-700 bg-neutral-950"
+              aria-label="Aura color"
+            />
+            <input
+              type="number"
+              min={0}
+              step={5}
+              value={a.radius_ft}
+              onChange={(e) => updateAura(a.id, { radius_ft: Number(e.target.value) })}
+              className="w-14 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-xs text-neutral-200"
+            />
+            <span className="text-xs text-neutral-500">ft</span>
+            <button
+              type="button"
+              onClick={() => removeAura(a.id)}
+              title="Remove"
+              className="ml-auto text-neutral-500 hover:text-red-400"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
       {inCombat &&
         (existingCombatant ? (
           <p className="mb-2 text-center text-xs text-neutral-500">
@@ -2724,6 +3081,105 @@ function TokenInspector({
         className="w-full rounded bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-500"
       >
         Remove token
+      </button>
+    </div>
+  );
+}
+
+// A player's minimal counterpart to TokenInspector's aura section, scoped to
+// a token they own — everything else in TokenInspector (label/owner/HP/AC/
+// counters/loot/remove) stays DM-only. RLS (token_auras_write, 0025) is the
+// actual enforcement; this just doesn't offer controls the server would
+// reject anyway.
+function TokenAuraPanel({
+  room,
+  token,
+  onClose,
+}: {
+  room: RoomStore;
+  token: RoomStore["tokens"][number];
+  onClose: () => void;
+}) {
+  const toast = useToast();
+  const { style: dragStyle, dragHandleProps } = usePanelDrag(token.id);
+  const auras = room.tokenAuras.filter((a) => a.token_id === token.id);
+
+  async function addAura() {
+    const { error } = await room.supabase.from("token_auras").insert({
+      token_id: token.id,
+      scene_id: token.scene_id,
+      room_id: token.room_id,
+      radius_ft: 10,
+      color: "#38bdf8",
+    });
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  async function updateAura(id: string, patch: { radius_ft?: number; color?: string }) {
+    const { error } = await room.supabase.from("token_auras").update(patch).eq("id", id);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  async function removeAura(id: string) {
+    const { error } = await room.supabase.from("token_auras").delete().eq("id", id);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  return (
+    <div
+      style={dragStyle}
+      className="absolute right-2 top-2 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm shadow-xl"
+    >
+      <div
+        {...dragHandleProps}
+        className="mb-2 flex cursor-move touch-none items-center justify-between"
+      >
+        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
+          {token.label} — Aura
+        </span>
+        <button className="text-neutral-500 hover:text-neutral-200" onClick={onClose}>
+          ✕
+        </button>
+      </div>
+
+      {auras.map((a) => (
+        <div key={a.id} className="mb-1 flex items-center gap-1">
+          <input
+            type="color"
+            value={a.color}
+            onChange={(e) => updateAura(a.id, { color: e.target.value })}
+            className="h-6 w-6 shrink-0 rounded border border-neutral-700 bg-neutral-950"
+            aria-label="Aura color"
+          />
+          <input
+            type="number"
+            min={0}
+            step={5}
+            value={a.radius_ft}
+            onChange={(e) => updateAura(a.id, { radius_ft: Number(e.target.value) })}
+            className="w-14 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-xs text-neutral-200"
+          />
+          <span className="text-xs text-neutral-500">ft</span>
+          <button
+            type="button"
+            onClick={() => removeAura(a.id)}
+            title="Remove"
+            className="ml-auto text-neutral-500 hover:text-red-400"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={addAura}
+        className="mt-1 w-full rounded border border-neutral-700 px-2 py-1 text-xs text-amber-300 hover:bg-neutral-800"
+      >
+        + Add aura
       </button>
     </div>
   );

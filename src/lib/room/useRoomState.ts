@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import type {
   Asset,
+  ChatMessage,
   Combatant,
   FogPolygon,
   FogDoor,
@@ -15,8 +16,14 @@ import type {
   Room,
   Scene,
   Token,
+  TokenAura,
   Wall,
 } from "@/lib/room/types";
+
+// How many recent room-wide chat messages the store keeps around. Only needs
+// to comfortably cover the speech-bubble expiry window (SceneCanvas) plus a
+// short scrollback for ChatBox — not the full session history.
+const CHAT_MESSAGE_LIMIT = 60;
 
 type State = {
   room: Room | null;
@@ -28,6 +35,8 @@ type State = {
   fogPolygons: FogPolygon[];
   fogDoors: FogDoor[];
   walls: Wall[];
+  tokenAuras: TokenAura[];
+  chatMessages: ChatMessage[];
   loading: boolean;
 };
 
@@ -41,6 +50,8 @@ const EMPTY: State = {
   fogPolygons: [],
   fogDoors: [],
   walls: [],
+  tokenAuras: [],
+  chatMessages: [],
   loading: true,
 };
 
@@ -91,7 +102,7 @@ export function useRoomState(
   }, [activeSceneId]);
 
   const loadRoomBits = useCallback(async () => {
-    const [rooms, scenes, members, assets] = await Promise.all([
+    const [rooms, scenes, members, assets, chatMessages] = await Promise.all([
       supabase.from("rooms").select("*").eq("id", roomId).single(),
       supabase
         .from("scenes")
@@ -108,6 +119,12 @@ export function useRoomState(
         .select("*")
         .eq("room_id", roomId)
         .order("created_at", { ascending: true }),
+      supabase
+        .from("chat_messages")
+        .select("*")
+        .eq("room_id", roomId)
+        .order("created_at", { ascending: false })
+        .limit(CHAT_MESSAGE_LIMIT),
     ]);
 
     const userIds = (members.data ?? []).map((m) => m.user_id);
@@ -132,6 +149,9 @@ export function useRoomState(
         role: m.role,
         display_name: nameById.get(m.user_id) ?? "Adventurer",
       })),
+      // Fetched newest-first (for the .limit to keep the most recent N), stored oldest-first
+      // to match every other list here and how ChatBox wants to render a scrollback.
+      chatMessages: (chatMessages.data ?? []).slice().reverse(),
       loading: false,
     }));
   }, [roomId, supabase]);
@@ -146,10 +166,11 @@ export function useRoomState(
           fogPolygons: [],
           fogDoors: [],
           walls: [],
+          tokenAuras: [],
         }));
         return;
       }
-      const [tokens, combatants, fogPolygons, fogDoors, walls] = await Promise.all([
+      const [tokens, combatants, fogPolygons, fogDoors, walls, tokenAuras] = await Promise.all([
         supabase
           .from("tokens")
           .select("*")
@@ -164,6 +185,7 @@ export function useRoomState(
         supabase.from("fog_polygons").select("*").eq("scene_id", sceneId),
         supabase.from("fog_doors").select("*").eq("scene_id", sceneId),
         supabase.from("walls").select("*").eq("scene_id", sceneId),
+        supabase.from("token_auras").select("*").eq("scene_id", sceneId),
       ]);
       // Ignore if the active scene changed while we were loading.
       if (activeSceneRef.current !== sceneId) return;
@@ -174,6 +196,7 @@ export function useRoomState(
         fogPolygons: fogPolygons.data ?? [],
         fogDoors: fogDoors.data ?? [],
         walls: walls.data ?? [],
+        tokenAuras: tokenAuras.data ?? [],
       }));
     },
     [supabase],
@@ -263,6 +286,27 @@ export function useRoomState(
           filter: `room_id=eq.${roomId}`,
         },
         () => loadRoomBits(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          // Append-only (no update/delete policies) — INSERT is all that fires.
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => loadRoomBits(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "token_auras",
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => loadSceneBits(activeSceneRef.current),
       )
       .on(
         "postgres_changes",
@@ -458,6 +502,14 @@ export function useRoomState(
     );
   }, []);
 
+  // Roll back an optimistic insert whose DB write failed.
+  const removeTokenLocal = useCallback((id: string) => {
+    setState((prev) => ({
+      ...prev,
+      tokens: prev.tokens.filter((t) => t.id !== id),
+    }));
+  }, []);
+
   // Optimistic local polygon add/remove (drawing/deleting a room shape
   // should feel instant rather than waiting on the realtime round-trip).
   const addFogPolygonLocal = useCallback((polygon: FogPolygon) => {
@@ -519,6 +571,7 @@ export function useRoomState(
     reloadScene: () => loadSceneBits(activeSceneRef.current),
     patchTokenLocal,
     addTokenLocal,
+    removeTokenLocal,
     addFogPolygonLocal,
     removeFogPolygonLocal,
     patchFogDoorLocal,
