@@ -67,13 +67,13 @@ export function ChatBox({ room }: { room: RoomStore }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-label="Chat"
-        className="fixed bottom-4 left-4 z-[62] flex h-12 w-12 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-xl shadow-lg transition-colors hover:bg-neutral-800"
+        className="fixed bottom-20 right-4 z-[62] flex h-12 w-12 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-xl shadow-lg transition-colors hover:bg-neutral-800"
       >
         💬
       </button>
 
       {open && (
-        <div className="fixed bottom-20 left-4 z-[62] flex max-h-[70vh] w-[18rem] flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
+        <div className="fixed bottom-20 right-20 z-[62] flex max-h-[70vh] w-[18rem] flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
           <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
               Chat
