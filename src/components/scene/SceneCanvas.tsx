@@ -1201,6 +1201,7 @@ export function SceneCanvas({
         is_hidden: true,
         hp: asset?.hp,
         ac: asset?.ac,
+        owner_user_id: asset?.owner_user_id ?? null,
       })
       .select()
       .single();

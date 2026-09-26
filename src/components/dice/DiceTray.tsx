@@ -371,7 +371,7 @@ export function DiceTray({ room }: { room: RoomStore }) {
       <div
         id="mv-dice-overlay"
         aria-hidden
-        className="pointer-events-none fixed inset-0 z-[60]"
+        className="pointer-events-none fixed inset-0 z-[100]"
       />
 
       <button

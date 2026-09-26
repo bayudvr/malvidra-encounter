@@ -90,6 +90,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
       is_hidden: true,
       hp: asset.hp,
       ac: asset.ac,
+      owner_user_id: asset.owner_user_id,
     });
     if (error) toast.error(error.message);
     else room.reloadScene();
@@ -104,6 +105,20 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     room.reload();
   }
 
+  // Default owner for tokens dropped from this asset from now on — tokens
+  // already on a scene keep whatever owner they have (reassign those from
+  // the token inspector), same snapshot rule as hp/ac above.
+  async function updateAssetOwner(id: string, ownerUserId: string | null) {
+    const { error } = await room.supabase
+      .from("assets")
+      .update({ owner_user_id: ownerUserId })
+      .eq("id", id);
+    if (error) toast.error(error.message);
+    room.reload();
+  }
+
+  const players = room.members.filter((m) => m.role === "player");
+
   return (
     <Panel title="Token library">
       <ul className="space-y-1">
@@ -112,9 +127,11 @@ export function AssetPanel({ room }: { room: RoomStore }) {
             key={a.id}
             asset={a}
             canDrop={!!scene}
+            players={players}
             onRename={(newName) => renameAsset(a.id, newName)}
             onImageChange={(newUrl) => updateAssetImage(a.id, newUrl)}
             onStatsChange={(hp, ac) => updateAssetStats(a.id, hp, ac)}
+            onOwnerChange={(ownerUserId) => updateAssetOwner(a.id, ownerUserId)}
             onDrop={() => dropToScene(a)}
             onDelete={() => deleteAsset(a.id)}
           />
@@ -224,17 +241,21 @@ function CreateAssetModal({
 function AssetRow({
   asset,
   canDrop,
+  players,
   onRename,
   onImageChange,
   onStatsChange,
+  onOwnerChange,
   onDrop,
   onDelete,
 }: {
   asset: Asset;
   canDrop: boolean;
+  players: RoomStore["members"];
   onRename: (name: string) => void;
   onImageChange: (url: string) => void;
   onStatsChange: (hp: number, ac: number) => void;
+  onOwnerChange: (ownerUserId: string | null) => void;
   onDrop: () => void;
   onDelete: () => void;
 }) {
@@ -337,6 +358,19 @@ function AssetRow({
           />
         </label>
       </div>
+      <select
+        value={asset.owner_user_id ?? ""}
+        onChange={(e) => onOwnerChange(e.target.value || null)}
+        aria-label="Owner"
+        className="ml-9 w-[calc(100%-2.25rem)] rounded bg-transparent px-1 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 focus:bg-neutral-800 focus:text-neutral-200 focus:outline-none"
+      >
+        <option value="">Owner: unassigned</option>
+        {players.map((p) => (
+          <option key={p.user_id} value={p.user_id}>
+            Owner: {p.display_name}
+          </option>
+        ))}
+      </select>
     </li>
   );
 }

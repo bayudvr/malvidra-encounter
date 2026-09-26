@@ -71,6 +71,7 @@ export interface Database {
           image_url: string | null;
           hp: number;
           ac: number;
+          owner_user_id: string | null;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -79,6 +80,7 @@ export interface Database {
           image_url?: string | null;
           hp?: number;
           ac?: number;
+          owner_user_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -86,6 +88,7 @@ export interface Database {
           image_url?: string | null;
           hp?: number;
           ac?: number;
+          owner_user_id?: string | null;
         };
         Relationships: [];
       };
