@@ -23,6 +23,7 @@ import type {
   Combatant,
   FogDoor,
   Scene,
+  SceneDrawing,
   Token,
   TokenCounter,
   TokenUpdate,
@@ -40,6 +41,23 @@ const TOKEN_DRAG_HEARTBEAT_MS = 1000;
 const TOKEN_DRAG_STALE_MS = 3000;
 // Longer than TokenSprite's glide (0.1s) so the final glide finishes before handing back.
 const TOKEN_DRAG_SETTLE_MS = 150;
+// Pen colors for freehand drawing (Draw tool).
+const DRAW_COLORS = ["#f59e0b", "#ef4444", "#22c55e", "#38bdf8", "#e879f9", "#f5f5f5"];
+// Pen thickness in screen px — converted to map px at the drawer's zoom when the stroke starts.
+const DRAW_WIDTH_PX = 3;
+// How long a right-click ping stays on screen.
+const PING_MS = 2500;
+// Pings are colored per person — a fixed palette (not colorFromString's hsl(), which Konva
+// doesn't parse in its space-separated form) picked by a hash of the user id.
+const PING_COLORS = ["#f59e0b", "#38bdf8", "#22c55e", "#e879f9", "#ef4444", "#facc15", "#2dd4bf"];
+
+function pingColorFor(userId: string) {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) | 0;
+  return PING_COLORS[Math.abs(hash) % PING_COLORS.length];
+}
+
+type Ping = { id: string; x: number; y: number; color: string; name: string };
 
 // Splits a trailing " <number>" off a label, e.g. "Goblin 2" -> ("Goblin", 2).
 // A label with no trailing number is its own base with an implicit 0.
@@ -245,6 +263,10 @@ export function SceneCanvas({
   // Shift held: suppresses stage panning so a shift-drag on empty map draws a
   // marquee instead. Reset on blur so it can't get stuck.
   const [shiftHeld, setShiftHeld] = useState(false);
+  // Select tool (DM): the same marquee/additive-click as holding Shift, but as a toggle — for
+  // tablets and for anyone who doesn't know the Shift shortcut.
+  const [selectMode, setSelectMode] = useState(false);
+  const selecting = shiftHeld || selectMode;
   const [marquee, setMarquee] = useState<{
     x0: number;
     y0: number;
@@ -320,6 +342,17 @@ export function SceneCanvas({
   >(new Map());
   const aoeChannelRef = useRef<RealtimeChannel | null>(null);
 
+  // Freehand drawing (Owlbear-style pen) — everyone can draw, strokes are saved to
+  // scene_drawings and stay until erased. `stroke` is the one in progress (flat [x, y, ...]).
+  const [drawMode, setDrawMode] = useState<"pen" | "eraser" | null>(null);
+  const [drawColor, setDrawColor] = useState(DRAW_COLORS[0]);
+  const [stroke, setStroke] = useState<{ points: number[]; width: number } | null>(null);
+  const strokeDrawing = useRef(false);
+
+  // Right-click pings (Foundry-style) — broadcast-only like AOE, never stored.
+  const [pings, setPings] = useState<Ping[]>([]);
+  const pingChannelRef = useRef<RealtimeChannel | null>(null);
+
   const [mapImage] = useImage(scene.map_url);
 
   // Reset selection and any in-progress map tool when scene changes
@@ -332,6 +365,11 @@ export function SceneCanvas({
     setWallPoints([]);
     setAoeMode(null);
     setAoe(null);
+    setDrawMode(null);
+    setSelectMode(false);
+    setStroke(null);
+    strokeDrawing.current = false;
+    setPings([]);
     fogUndo.current = [];
   }, [scene.id]);
 
@@ -528,6 +566,31 @@ export function SceneCanvas({
     };
   }, [castMode, room.supabase, scene.room_id, scene.id]);
 
+  // --- Pings ----------------------------------------------------------------
+  // Right-click anywhere on the map pings that spot for everyone in the room. Cast screens
+  // listen too (no castMode guard) but never send — they can't right-click anything.
+  const addPing = useCallback((ping: Ping) => {
+    setPings((prev) => [...prev, ping]);
+    setTimeout(() => setPings((prev) => prev.filter((p) => p.id !== ping.id)), PING_MS);
+  }, []);
+
+  useEffect(() => {
+    const channel = room.supabase.channel(`ping:${scene.room_id}`, {
+      config: { broadcast: { self: false } },
+    });
+    pingChannelRef.current = channel;
+    channel.on("broadcast", { event: "ping" }, ({ payload }) => {
+      const p = payload as Ping & { sceneId: string };
+      if (p.sceneId !== scene.id) return;
+      addPing({ id: p.id, x: p.x, y: p.y, color: p.color, name: p.name });
+    });
+    channel.subscribe();
+    return () => {
+      pingChannelRef.current = null;
+      room.supabase.removeChannel(channel);
+    };
+  }, [room.supabase, scene.room_id, scene.id, addPing]);
+
   // --- Live token drag ------------------------------------------------------
   // Everyone else sees a token move while it's being dragged instead of jumping on drop.
   // Ephemeral like AOE: the DB write still only happens on drop (moveToken /
@@ -684,6 +747,26 @@ export function SceneCanvas({
     });
   }
 
+  function sendPing(e: Konva.KonvaEventObject<PointerEvent>) {
+    e.evt.preventDefault();
+    if (castMode) return;
+    const p = worldPointer(e);
+    if (!p) return;
+    const ping: Ping = {
+      id: crypto.randomUUID(),
+      x: p.x,
+      y: p.y,
+      color: pingColorFor(room.userId),
+      name: actorDisplayName,
+    };
+    addPing(ping);
+    pingChannelRef.current?.send({
+      type: "broadcast",
+      event: "ping",
+      payload: { ...ping, sceneId: scene.id },
+    });
+  }
+
   function broadcastAoeClear() {
     aoeChannelRef.current?.send({
       type: "broadcast",
@@ -777,6 +860,72 @@ export function SceneCanvas({
     setRuler(null);
   }
 
+  function exitDraw() {
+    setDrawMode(null);
+    setStroke(null);
+    strokeDrawing.current = false;
+  }
+
+  async function finishStroke() {
+    strokeDrawing.current = false;
+    const done = stroke;
+    setStroke(null);
+    // A plain click leaves a single point — draw it as a dot rather than dropping it.
+    if (!done || done.points.length < 2) return;
+    const points =
+      done.points.length === 2 ? [...done.points, done.points[0] + 0.01, done.points[1]] : done.points;
+    const drawing: SceneDrawing = {
+      id: crypto.randomUUID(),
+      scene_id: scene.id,
+      room_id: scene.room_id,
+      user_id: room.userId,
+      points,
+      color: drawColor,
+      width: done.width,
+      created_at: new Date().toISOString(),
+    };
+    room.addDrawingLocal(drawing);
+    const { error } = await room.supabase.from("scene_drawings").insert({
+      id: drawing.id,
+      scene_id: drawing.scene_id,
+      room_id: drawing.room_id,
+      points: drawing.points,
+      color: drawing.color,
+      width: drawing.width,
+    });
+    if (error) {
+      room.removeDrawingsLocal([drawing.id]);
+      toast.error(error.message);
+    }
+  }
+
+  const canErase = (d: SceneDrawing) => isDM || d.user_id === room.userId;
+
+  async function deleteDrawings(ids: string[]) {
+    if (ids.length === 0) return;
+    room.removeDrawingsLocal(ids);
+    const { error } = await room.supabase.from("scene_drawings").delete().in("id", ids);
+    if (error) {
+      toast.error(error.message);
+      room.reloadScene();
+    }
+  }
+
+  function undoMyDrawing() {
+    const mine = room.drawings.filter((d) => d.user_id === room.userId);
+    const last = mine[mine.length - 1];
+    if (last) void deleteDrawings([last.id]);
+  }
+
+  function clearDrawings(all: boolean) {
+    const ids = room.drawings
+      .filter((d) => (all ? canErase(d) : d.user_id === room.userId))
+      .map((d) => d.id);
+    if (ids.length === 0) return;
+    if (all && !confirm(`Erase all ${ids.length} drawings on this scene?`)) return;
+    void deleteDrawings(ids);
+  }
+
   function exitAoe() {
     setAoeMode(null);
     setAoeMenu(false);
@@ -824,10 +973,23 @@ export function SceneCanvas({
 
   function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
     if (castMode) return;
+    // Right-click is the ping (onContextMenu) — keep it from also acting as a tool click.
+    if ("button" in e.evt && e.evt.button !== 0) return;
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       lastPinch.current = null;
+      strokeDrawing.current = false;
+      setStroke(null);
       return;
     }
+    if (drawMode === "pen") {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (!p) return;
+      strokeDrawing.current = true;
+      setStroke({ points: [p.x, p.y], width: DRAW_WIDTH_PX / view.scale });
+      return;
+    }
+    if (drawMode === "eraser") return;
     if (drawingPolygon) {
       e.evt.preventDefault();
       const p = worldPointer(e);
@@ -867,7 +1029,7 @@ export function SceneCanvas({
       return;
     }
     if (e.target === e.target.getStage()) {
-      if (isDM && shiftHeld) {
+      if (isDM && selecting) {
         const p = worldPointer(e);
         if (p) {
           marqueeDrawing.current = true;
@@ -888,6 +1050,18 @@ export function SceneCanvas({
     if (marqueeDrawing.current) {
       const p = worldPointer(e);
       if (p) setMarquee((m) => (m ? { ...m, x1: p.x, y1: p.y } : m));
+      return;
+    }
+    if (strokeDrawing.current) {
+      const p = worldPointer(e);
+      if (!p) return;
+      setStroke((s) => {
+        if (!s) return s;
+        const n = s.points.length;
+        // Skip points closer than ~2 screen px to the last one — keeps rows small.
+        if (Math.hypot(p.x - s.points[n - 2], p.y - s.points[n - 1]) < 2 / view.scale) return s;
+        return { ...s, points: [...s.points, p.x, p.y] };
+      });
       return;
     }
     if (drawingPolygon) {
@@ -923,6 +1097,10 @@ export function SceneCanvas({
 
   function stagePointerUp() {
     if (castMode) return;
+    if (strokeDrawing.current) {
+      void finishStroke();
+      return;
+    }
     if (marqueeDrawing.current) {
       marqueeDrawing.current = false;
       if (marquee) {
@@ -1533,7 +1711,8 @@ export function SceneCanvas({
           !addingDoor &&
           !drawingWall &&
           !aoeMode &&
-          !shiftHeld &&
+          !drawMode &&
+          !selecting &&
           !marquee
         }
         x={view.x}
@@ -1558,8 +1737,9 @@ export function SceneCanvas({
         onTouchStart={stagePointerDown}
         onTouchMove={stagePointerMove}
         onTouchEnd={stagePointerUp}
+        onContextMenu={sendPing}
         style={
-          measuring || drawingPolygon || addingDoor || drawingWall || aoeMode
+          measuring || drawingPolygon || addingDoor || drawingWall || aoeMode || drawMode
             ? { cursor: "crosshair" }
             : undefined
         }
@@ -1631,7 +1811,8 @@ export function SceneCanvas({
                     !drawingPolygon &&
                     !addingDoor &&
                     !drawingWall &&
-                    !aoeMode
+                    !aoeMode &&
+                    !drawMode
                   }
                   owned={owned}
                   selected={selectedIds.includes(t.id)}
@@ -1648,18 +1829,21 @@ export function SceneCanvas({
                       drawingPolygon ||
                       addingDoor ||
                       drawingWall ||
-                      aoeMode
+                      aoeMode ||
+                      drawMode
                     )
                       return;
                     const evt = e?.evt as
                       | MouseEvent
                       | TouchEvent
                       | undefined;
-                    const additive = !!(
-                      evt &&
-                      "shiftKey" in evt &&
-                      (evt.shiftKey || evt.metaKey || evt.ctrlKey)
-                    );
+                    const additive =
+                      selectMode ||
+                      !!(
+                        evt &&
+                        "shiftKey" in evt &&
+                        (evt.shiftKey || evt.metaKey || evt.ctrlKey)
+                      );
                     toggleTokenSelection(t.id, additive);
                   }}
                   onDragStart={(e) => handleTokenDragStart(t, e)}
@@ -1708,6 +1892,42 @@ export function SceneCanvas({
             })}
           {/* ping marker at origin for orientation */}
           <Circle x={0} y={0} radius={3} fill="#f59e0b" listening={false} />
+        </Layer>
+
+        {/* Freehand drawings sit above tokens but under fog, so a sketch never reveals a
+            hidden area. Only listens in eraser mode, and then only on strokes this user
+            may erase (their own, or any for the DM). */}
+        <Layer listening={drawMode === "eraser"}>
+          {room.drawings.map((d) => (
+            <Line
+              key={d.id}
+              points={d.points}
+              stroke={d.color}
+              strokeWidth={d.width}
+              hitStrokeWidth={Math.max(d.width, 12 / view.scale)}
+              lineCap="round"
+              lineJoin="round"
+              tension={0.3}
+              listening={drawMode === "eraser" && canErase(d)}
+              onMouseDown={() => void deleteDrawings([d.id])}
+              onTouchStart={() => void deleteDrawings([d.id])}
+              onMouseEnter={(e) => {
+                // Drag-erase: sweeping over strokes with the button held erases each one.
+                if (e.evt.buttons === 1) void deleteDrawings([d.id]);
+              }}
+            />
+          ))}
+          {stroke && (
+            <Line
+              points={stroke.points}
+              stroke={drawColor}
+              strokeWidth={stroke.width}
+              lineCap="round"
+              lineJoin="round"
+              tension={0.3}
+              listening={false}
+            />
+          )}
         </Layer>
 
         {scene.fog_enabled && (
@@ -2026,6 +2246,14 @@ export function SceneCanvas({
             ))}
           </Layer>
         )}
+
+        {pings.length > 0 && (
+          <Layer listening={false}>
+            {pings.map((p) => (
+              <PingMarker key={p.id} ping={p} viewScale={view.scale} />
+            ))}
+          </Layer>
+        )}
       </Stage>
 
       {!castMode && (
@@ -2064,6 +2292,8 @@ export function SceneCanvas({
                   setRuler(null);
                   setMeasuring(true);
                   setMeasureMenu(false);
+                  exitDraw();
+                  setSelectMode(false);
                   cancelPolygon();
                   setAddingDoor(false);
                   cancelWall();
@@ -2099,6 +2329,8 @@ export function SceneCanvas({
                 exitMeasure();
                 cancelWall();
                 exitAoe();
+                exitDraw();
+                setSelectMode(false);
               }}
               className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
                 drawingPolygon || addingDoor
@@ -2193,6 +2425,8 @@ export function SceneCanvas({
               cancelPolygon();
               setAddingDoor(false);
               cancelWall();
+              exitDraw();
+              setSelectMode(false);
             }}
             className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
               aoeMode
@@ -2251,6 +2485,108 @@ export function SceneCanvas({
         </div>
 
         {isDM && (
+          <button
+            type="button"
+            onClick={() => {
+              const next = !selectMode;
+              exitMeasure();
+              cancelPolygon();
+              setAddingDoor(false);
+              cancelWall();
+              exitAoe();
+              exitDraw();
+              setSelectMode(next);
+              if (next) toast.info("Drag a box or tap tokens to select several");
+            }}
+            title="Select several tokens (or hold Shift)"
+            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+              selectMode
+                ? "border-amber-400 bg-amber-400/20 text-amber-200"
+                : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+            }`}
+          >
+            ⬚ {selectMode ? "Selecting…" : "Select"}
+          </button>
+        )}
+
+        <div className="flex flex-wrap items-end gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              if (drawMode) {
+                exitDraw();
+                return;
+              }
+              exitMeasure();
+              cancelPolygon();
+              setAddingDoor(false);
+              cancelWall();
+              exitAoe();
+              setSelectMode(false);
+              setDrawMode("pen");
+            }}
+            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+              drawMode
+                ? "border-amber-400 bg-amber-400/20 text-amber-200"
+                : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+            }`}
+          >
+            ✏️ {drawMode ? "Drawing…" : "Draw"}
+          </button>
+
+          {drawMode && (
+            <>
+              <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-xs">
+                {(["pen", "eraser"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDrawMode(m)}
+                    className={`px-2 py-1 capitalize ${
+                      drawMode === m
+                        ? "bg-amber-400/20 text-amber-200"
+                        : "text-neutral-300 hover:bg-neutral-800"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+              {drawMode === "pen" && (
+                <div className="flex items-center gap-1 rounded-md border border-neutral-700 bg-neutral-900/90 px-1.5 py-1">
+                  {DRAW_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      aria-label={`Pen color ${c}`}
+                      onClick={() => setDrawColor(c)}
+                      style={{ background: c }}
+                      className={`h-4 w-4 rounded-full ${
+                        drawColor === c ? "ring-2 ring-white ring-offset-1 ring-offset-neutral-900" : ""
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+              <button type="button" onClick={undoMyDrawing} className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800">
+                Undo
+              </button>
+              <button type="button" onClick={() => clearDrawings(false)} className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800">
+                Clear mine
+              </button>
+              {isDM && (
+                <button type="button" onClick={() => clearDrawings(true)} className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800">
+                  Clear all
+                </button>
+              )}
+              <button type="button" onClick={exitDraw} className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800">
+                Done
+              </button>
+            </>
+          )}
+        </div>
+
+        {isDM && (
           <div className="relative flex items-end gap-1">
             <button
               type="button"
@@ -2263,6 +2599,8 @@ export function SceneCanvas({
                 cancelPolygon();
                 setAddingDoor(false);
                 exitAoe();
+                exitDraw();
+                setSelectMode(false);
                 setDrawingWall(true);
                 setWallPoints([]);
                 toast.info("Click points to outline a wall — click the first point to close");
@@ -2356,6 +2694,49 @@ export function SceneCanvas({
         />
       )}
     </div>
+  );
+}
+
+// Foundry-style ping: three rings expanding out from the spot and fading, plus who pinged.
+// Sized in screen px (divided by the view scale) so it reads the same at any zoom.
+function PingMarker({ ping, viewScale }: { ping: Ping; viewScale: number }) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const start = performance.now();
+    let frame = requestAnimationFrame(function tick(now) {
+      const next = Math.min(1, (now - start) / PING_MS);
+      setT(next);
+      if (next < 1) frame = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  const k = 1 / viewScale;
+  return (
+    <Group x={ping.x} y={ping.y} listening={false}>
+      {[0, 0.33, 0.66].map((offset) => {
+        // Each ring loops twice over the ping's lifetime, staggered by `offset`.
+        const phase = (t * 2 + offset) % 1;
+        return (
+          <Circle
+            key={offset}
+            radius={(10 + phase * 50) * k}
+            stroke={ping.color}
+            strokeWidth={3 * k}
+            opacity={(1 - phase) * (1 - t * 0.5)}
+          />
+        );
+      })}
+      <Circle radius={5 * k} fill={ping.color} opacity={1 - t * t} />
+      <Text
+        text={ping.name}
+        x={10 * k}
+        y={-24 * k}
+        fontSize={12 * k}
+        fontStyle="bold"
+        fill={ping.color}
+        opacity={1 - t * t}
+      />
+    </Group>
   );
 }
 

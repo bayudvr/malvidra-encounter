@@ -15,6 +15,7 @@ import type {
   Role,
   Room,
   Scene,
+  SceneDrawing,
   Token,
   TokenAura,
   Wall,
@@ -36,6 +37,7 @@ type State = {
   fogDoors: FogDoor[];
   walls: Wall[];
   tokenAuras: TokenAura[];
+  drawings: SceneDrawing[];
   chatMessages: ChatMessage[];
   loading: boolean;
 };
@@ -51,6 +53,7 @@ const EMPTY: State = {
   fogDoors: [],
   walls: [],
   tokenAuras: [],
+  drawings: [],
   chatMessages: [],
   loading: true,
 };
@@ -167,10 +170,12 @@ export function useRoomState(
           fogDoors: [],
           walls: [],
           tokenAuras: [],
+          drawings: [],
         }));
         return;
       }
-      const [tokens, combatants, fogPolygons, fogDoors, walls, tokenAuras] = await Promise.all([
+      const [tokens, combatants, fogPolygons, fogDoors, walls, tokenAuras, drawings] =
+        await Promise.all([
         supabase
           .from("tokens")
           .select("*")
@@ -186,6 +191,11 @@ export function useRoomState(
         supabase.from("fog_doors").select("*").eq("scene_id", sceneId),
         supabase.from("walls").select("*").eq("scene_id", sceneId),
         supabase.from("token_auras").select("*").eq("scene_id", sceneId),
+        supabase
+          .from("scene_drawings")
+          .select("*")
+          .eq("scene_id", sceneId)
+          .order("created_at", { ascending: true }),
       ]);
       // Ignore if the active scene changed while we were loading.
       if (activeSceneRef.current !== sceneId) return;
@@ -197,6 +207,7 @@ export function useRoomState(
         fogDoors: fogDoors.data ?? [],
         walls: walls.data ?? [],
         tokenAuras: tokenAuras.data ?? [],
+        drawings: drawings.data ?? [],
       }));
     },
     [supabase],
@@ -464,6 +475,35 @@ export function useRoomState(
           });
         },
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "scene_drawings",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          setState((prev) => {
+            const sceneId = activeSceneRef.current;
+            if (payload.eventType === "DELETE") {
+              return {
+                ...prev,
+                drawings: prev.drawings.filter(
+                  (d) => d.id !== (payload.old as { id: string }).id,
+                ),
+              };
+            }
+            const row = payload.new as SceneDrawing;
+            if (row.scene_id !== sceneId) return prev;
+            const exists = prev.drawings.some((d) => d.id === row.id);
+            return {
+              ...prev,
+              drawings: exists ? prev.drawings : [...prev.drawings, row],
+            };
+          });
+        },
+      )
       .subscribe();
 
     return () => {
@@ -557,6 +597,23 @@ export function useRoomState(
     }));
   }, []);
 
+  // Optimistic stroke add/remove — a finished pen stroke or an erase shows
+  // up for the drawer right away; the realtime echo is a no-op dedupe.
+  const addDrawingLocal = useCallback((drawing: SceneDrawing) => {
+    setState((prev) =>
+      prev.drawings.some((d) => d.id === drawing.id)
+        ? prev
+        : { ...prev, drawings: [...prev.drawings, drawing] },
+    );
+  }, []);
+
+  const removeDrawingsLocal = useCallback((ids: string[]) => {
+    setState((prev) => ({
+      ...prev,
+      drawings: prev.drawings.filter((d) => !ids.includes(d.id)),
+    }));
+  }, []);
+
   return {
     ...state,
     supabase,
@@ -578,6 +635,8 @@ export function useRoomState(
     addFogDoorLocal,
     addWallLocal,
     removeWallLocal,
+    addDrawingLocal,
+    removeDrawingsLocal,
   };
 }
 

@@ -399,6 +399,29 @@ export interface Database {
         Update: { radius_ft?: number; color?: string };
         Relationships: [];
       };
+      scene_drawings: {
+        Row: {
+          id: string;
+          scene_id: string;
+          room_id: string;
+          user_id: string;
+          points: number[];
+          color: string;
+          width: number;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          scene_id: string;
+          room_id: string;
+          user_id?: string;
+          points: number[];
+          color?: string;
+          width?: number;
+          created_at?: string;
+        };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       walls: {
         Row: {
           id: string;
