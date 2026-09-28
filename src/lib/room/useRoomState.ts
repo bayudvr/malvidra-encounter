@@ -223,6 +223,9 @@ export function useRoomState(
     loadSceneBits(activeSceneId);
   }, [activeSceneId, loadSceneBits]);
 
+  // The room channel, kept so a member can nudge everyone else to reload (see notifyMembersChanged).
+  const roomChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
   // Realtime — or, for the anonymous cast screen, a plain poll (see RoomStateOpts).
   useEffect(() => {
     if (!realtime) {
@@ -235,6 +238,9 @@ export function useRoomState(
 
     const channel = supabase
       .channel(`room:${roomId}`)
+      // profiles isn't in the realtime publication, so a rename is announced over broadcast
+      // instead — receivers just reload members to pick up the new display_name.
+      .on("broadcast", { event: "members-changed" }, () => loadRoomBits())
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` },
@@ -505,8 +511,10 @@ export function useRoomState(
         },
       )
       .subscribe();
+    roomChannelRef.current = channel;
 
     return () => {
+      roomChannelRef.current = null;
       supabase.removeChannel(channel);
     };
   }, [
@@ -614,6 +622,10 @@ export function useRoomState(
     }));
   }, []);
 
+  const notifyMembersChanged = useCallback(() => {
+    roomChannelRef.current?.send({ type: "broadcast", event: "members-changed", payload: {} });
+  }, []);
+
   return {
     ...state,
     supabase,
@@ -637,6 +649,7 @@ export function useRoomState(
     removeWallLocal,
     addDrawingLocal,
     removeDrawingsLocal,
+    notifyMembersChanged,
   };
 }
 

@@ -33,6 +33,24 @@ export function MemberPanel({
     }
   }
 
+  const [editingName, setEditingName] = useState<string | null>(null);
+
+  // Works the same for account and guest players — both have a profiles row,
+  // and profiles_update (0001) lets anyone rename only themselves.
+  async function saveName() {
+    const name = editingName?.trim();
+    setEditingName(null);
+    const current = room.members.find((m) => m.user_id === room.userId)?.display_name;
+    if (!name || name === current || !room.userId) return;
+    const { error } = await room.supabase
+      .from("profiles")
+      .update({ display_name: name })
+      .eq("id", room.userId);
+    if (error) return toast.error(error.message);
+    await room.reload();
+    room.notifyMembersChanged();
+  }
+
   async function kick(memberId: string) {
     if (!confirm("Remove this player from the room?")) return;
     const { error } = await room.supabase
@@ -63,12 +81,43 @@ export function MemberPanel({
             key={m.id}
             className="flex items-center justify-between rounded px-2 py-1 text-sm"
           >
-            <span className="truncate">
-              {m.display_name}
-              {m.user_id === room.userId && (
-                <span className="text-neutral-500"> (you)</span>
-              )}
-            </span>
+            {m.user_id === room.userId && editingName !== null ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void saveName();
+                }}
+                className="mr-2 min-w-0 flex-1"
+              >
+                <input
+                  autoFocus
+                  value={editingName}
+                  maxLength={40}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  onBlur={() => void saveName()}
+                  onKeyDown={(e) => e.key === "Escape" && setEditingName(null)}
+                  className="w-full rounded border border-neutral-700 bg-neutral-950 px-1.5 py-0.5 text-sm focus:outline-none"
+                />
+              </form>
+            ) : (
+              <span className="flex min-w-0 items-center gap-1">
+                <span className="truncate">{m.display_name}</span>
+                {m.user_id === room.userId && (
+                  <>
+                    <span className="shrink-0 text-neutral-500">(you)</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingName(m.display_name)}
+                      className="shrink-0 px-1 text-neutral-500 hover:text-neutral-200"
+                      aria-label="Edit your name"
+                      title="Edit your name"
+                    >
+                      ✎
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
             <span className="flex items-center gap-1">
               <Badge
                 className={
