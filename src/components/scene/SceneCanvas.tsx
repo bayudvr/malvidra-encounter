@@ -2788,6 +2788,7 @@ export function SceneCanvas({
                   lineWidthPx={(r.lineWidthFt / scene.feet_per_square) * scene.grid_size}
                   feetFromPixels={feetFromPixels}
                   viewScale={view.scale}
+                  gridSize={scene.grid_size}
                 />
                 <Text
                   text={r.authorName}
@@ -3129,7 +3130,7 @@ export function SceneCanvas({
 
         <button
           type="button"
-          onClick={targetMode ? clearTargetLock : beginTargetMode}
+          onClick={targetMode || localTargetLock ? clearTargetLock : beginTargetMode}
           title="Target: choose attacker then target"
           className={`hidden rounded-md border px-2 py-1 text-xs font-medium shadow sm:block ${
             targetMode || localTargetLock
@@ -3639,6 +3640,7 @@ function TargetLine({
   cover,
   feet,
   viewScale,
+  gridSize,
 }: {
   source: Token;
   target: Token;
@@ -3648,12 +3650,13 @@ function TargetLine({
   cover: CoverHint;
   feet: number;
   viewScale: number;
+  gridSize: number;
 }) {
   const dx = target.x - source.x;
   const dy = target.y - source.y;
   const dist = Math.max(1, Math.hypot(dx, dy));
-  const sourceRadius = (source.size * 35) / 2;
-  const targetRadius = (target.size * 35) / 2;
+  const sourceRadius = (source.size * gridSize) / 2;
+  const targetRadius = (target.size * gridSize) / 2;
   const ux = dx / dist;
   const uy = dy / dist;
   const startX = source.x + ux * Math.min(sourceRadius, dist * 0.2);
@@ -3682,7 +3685,7 @@ function TargetLine({
       <Circle
         x={target.x}
         y={target.y}
-        radius={(target.size * 35) / 2 + 7 * k}
+        radius={(target.size * gridSize) / 2 + 7 * k}
         stroke={color}
         strokeWidth={3 * k}
         dash={[7 * k, 4 * k]}
