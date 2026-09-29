@@ -2380,12 +2380,20 @@ export function SceneCanvas({
       </Stage>
 
       {!castMode && (
-      <div className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-end gap-1 overflow-x-auto pb-0.5 sm:max-w-none sm:gap-2 sm:overflow-visible sm:pb-0">
+      <div className="absolute bottom-2 left-2 z-20 flex items-end gap-1 sm:gap-2">
         <div className="relative">
           <button
             type="button"
-            onClick={() => setMeasureMenu((o) => !o)}
-            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+            onClick={() => {
+              setMeasureMenu((o) => !o);
+              setFogMenu(false);
+              setMobileToolMore(false);
+              if (!measureMenu) {
+                exitDraw();
+                setSelectMode(false);
+              }
+            }}
+            className={`min-h-11 min-w-11 rounded-md border px-2 py-1 text-xs font-medium shadow sm:min-h-0 sm:min-w-0 ${
               measuring
                 ? "border-amber-400 bg-amber-400/20 text-amber-200"
                 : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
@@ -2395,7 +2403,7 @@ export function SceneCanvas({
           </button>
 
           {measureMenu && (
-            <div className="absolute bottom-full left-0 mb-1 w-48 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl">
+            <div className="absolute bottom-full left-0 mb-1 hidden w-48 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl sm:block">
               <button
                 type="button"
                 onClick={() => {
@@ -2437,7 +2445,7 @@ export function SceneCanvas({
           <button
             type="button"
             onClick={exitMeasure}
-            className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+            className="hidden rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:block"
           >
             Done
           </button>
@@ -2449,13 +2457,15 @@ export function SceneCanvas({
               type="button"
               onClick={() => {
                 setFogMenu((o) => !o);
+                setMeasureMenu(false);
+                setMobileToolMore(false);
                 exitMeasure();
                 cancelWall();
                 exitAoe();
                 exitDraw();
                 setSelectMode(false);
               }}
-              className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+              className={`min-h-11 min-w-11 rounded-md border px-2 py-1 text-xs font-medium shadow sm:min-h-0 sm:min-w-0 ${
                 drawingPolygon || addingDoor
                   ? "border-amber-400 bg-amber-400/20 text-amber-200"
                   : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
@@ -2473,7 +2483,7 @@ export function SceneCanvas({
             </button>
 
             {fogMenu && (
-              <div className="absolute bottom-full left-0 mb-1 w-48 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl">
+              <div className="absolute bottom-full left-0 mb-1 hidden w-48 overflow-hidden rounded-lg border border-neutral-700 bg-neutral-900 text-xs shadow-xl sm:block">
                 <button
                   type="button"
                   onClick={() => {
@@ -2513,7 +2523,7 @@ export function SceneCanvas({
               <button
                 type="button"
                 onClick={undoPolygonPoint}
-                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                className="hidden rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:block"
               >
                 Undo point
               </button>
@@ -2522,7 +2532,7 @@ export function SceneCanvas({
               <button
                 type="button"
                 onClick={() => void finishPolygon()}
-                className="rounded-md border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-600/30"
+                className="hidden rounded-md border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-600/30 sm:block"
               >
                 Finish
               </button>
@@ -2534,7 +2544,7 @@ export function SceneCanvas({
                   cancelPolygon();
                   setAddingDoor(false);
                 }}
-                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                className="hidden rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:block"
               >
                 {drawingPolygon ? "Cancel" : "Done"}
               </button>
@@ -2554,7 +2564,7 @@ export function SceneCanvas({
               exitDraw();
               setSelectMode(false);
             }}
-            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+            className={`min-h-11 min-w-11 rounded-md border px-2 py-1 text-xs font-medium shadow sm:min-h-0 sm:min-w-0 ${
               aoeMode
                 ? "border-amber-400 bg-amber-400/20 text-amber-200"
                 : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
@@ -2625,7 +2635,7 @@ export function SceneCanvas({
               if (next) toast.info("Drag a box or tap tokens to select several");
             }}
             title="Select several tokens (or hold Shift)"
-            className={`rounded-md border px-2 py-1 text-xs font-medium shadow ${
+            className={`min-h-11 min-w-11 rounded-md border px-2 py-1 text-xs font-medium shadow sm:min-h-0 sm:min-w-0 ${
               selectMode
                 ? "border-amber-400 bg-amber-400/20 text-amber-200"
                 : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
@@ -2643,6 +2653,9 @@ export function SceneCanvas({
                 exitDraw();
                 return;
               }
+              setMeasureMenu(false);
+              setFogMenu(false);
+              setMobileToolMore(false);
               exitMeasure();
               cancelPolygon();
               setAddingDoor(false);
@@ -2661,7 +2674,7 @@ export function SceneCanvas({
           </button>
 
           {drawMode && (
-            <>
+            <div className="hidden items-end gap-1 sm:flex">
               <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-xs">
                 {(["pen", "eraser"] as const).map((m) => (
                   <button
@@ -2708,7 +2721,7 @@ export function SceneCanvas({
               <button type="button" onClick={exitDraw} className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800">
                 Done
               </button>
-            </>
+            </div>
           )}
         </div>
 
@@ -2744,7 +2757,7 @@ export function SceneCanvas({
               <button
                 type="button"
                 onClick={undoWallPoint}
-                className="rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                className="hidden rounded-md border border-neutral-700 bg-neutral-900/90 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:block"
               >
                 Undo point
               </button>
@@ -2753,7 +2766,7 @@ export function SceneCanvas({
               <button
                 type="button"
                 onClick={() => void finishWall()}
-                className="rounded-md border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-600/30"
+                className="hidden rounded-md border border-emerald-600 bg-emerald-600/20 px-2 py-1 text-xs text-emerald-300 hover:bg-emerald-600/30 sm:block"
               >
                 Finish
               </button>
@@ -2770,105 +2783,28 @@ export function SceneCanvas({
           </div>
         )}
 
-        <div className="relative sm:hidden">
-          <button
-            type="button"
-            aria-label="More map tools"
-            aria-expanded={mobileToolMore}
-            onClick={() => setMobileToolMore((v) => !v)}
-            className="min-h-9 rounded-md border border-neutral-700 bg-neutral-900/90 px-2 text-sm font-bold text-neutral-200 shadow"
-          >
-            •••
-          </button>
-
-          {mobileToolMore && (
-            <div className="absolute bottom-full right-0 mb-1 w-52 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 p-1 text-xs shadow-2xl">
-              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
-                More tools
-              </div>
-
-              <div className="grid grid-cols-2 gap-1">
-                {(["cone", "line", "cube", "circle"] as const).map((shape) => (
-                  <button
-                    key={shape}
-                    type="button"
-                    onClick={() => {
-                      exitMeasure();
-                      cancelPolygon();
-                      setAddingDoor(false);
-                      cancelWall();
-                      exitDraw();
-                      setSelectMode(false);
-                      setAoeMode(shape);
-                      setMobileToolMore(false);
-                    }}
-                    className={`min-h-10 rounded-lg px-2 capitalize ${
-                      aoeMode === shape
-                        ? "bg-amber-400/20 text-amber-200"
-                        : "bg-neutral-900 text-neutral-300"
-                    }`}
-                  >
-                    📐 {shape}
-                  </button>
-                ))}
-
-                {isDM && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      exitMeasure();
-                      cancelPolygon();
-                      setAddingDoor(false);
-                      exitAoe();
-                      exitDraw();
-                      setSelectMode(false);
-                      setDrawingWall(true);
-                      setWallPoints([]);
-                      setMobileToolMore(false);
-                      toast.info("Tap points to outline a wall");
-                    }}
-                    className={`min-h-10 rounded-lg px-2 ${
-                      drawingWall
-                        ? "bg-amber-400/20 text-amber-200"
-                        : "bg-neutral-900 text-neutral-300"
-                    }`}
-                  >
-                    🧱 Wall
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => zoomBy(1 / 1.25)}
-                  className="min-h-10 rounded-lg bg-neutral-900 px-2 text-neutral-300"
-                >
-                  − Zoom
-                </button>
-                <button
-                  type="button"
-                  onClick={() => zoomBy(1.25)}
-                  className="min-h-10 rounded-lg bg-neutral-900 px-2 text-neutral-300"
-                >
-                  + Zoom
-                </button>
-              </div>
-
-              {(aoeMode || drawingWall) && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (aoeMode) exitAoe();
-                    if (drawingWall) cancelWall();
-                    setMobileToolMore(false);
-                  }}
-                  className="mt-1 min-h-10 w-full rounded-lg border border-neutral-700 text-neutral-300"
-                >
-                  Done active tool
-                </button>
-              )}
-            </div>
-          )}
-        </div>
+        <button
+          type="button"
+          aria-label="More map tools"
+          aria-expanded={mobileToolMore}
+          onClick={() => {
+            const next = !mobileToolMore;
+            setMobileToolMore(next);
+            setMeasureMenu(false);
+            setFogMenu(false);
+            if (next) {
+              exitDraw();
+              setSelectMode(false);
+            }
+          }}
+          className={`min-h-11 min-w-11 rounded-md border px-2 text-sm font-bold shadow sm:hidden ${
+            mobileToolMore
+              ? "border-amber-400 bg-amber-400/20 text-amber-200"
+              : "border-neutral-700 bg-neutral-900/90 text-neutral-200"
+          }`}
+        >
+          •••
+        </button>
 
         <div className="hidden items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200 sm:flex">
           <button
@@ -2892,6 +2828,207 @@ export function SceneCanvas({
           </button>
         </div>
       </div>
+      )}
+
+      {!castMode && (
+        <div className="pointer-events-none absolute inset-x-2 bottom-16 z-30 sm:hidden">
+          {measureMenu && (
+            <div className="pointer-events-auto rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
+              <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Measure</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    exitMeasure();
+                    toast.info("Drag a token — the ruler shows its move in ft");
+                  }}
+                  className="min-h-12 rounded-lg bg-neutral-900 px-3 text-left text-sm text-neutral-200"
+                >
+                  Token movement
+                  <span className="block text-[10px] text-neutral-500">ruler while dragging</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRuler(null);
+                    setMeasuring(true);
+                    setMeasureMenu(false);
+                    exitDraw();
+                    setSelectMode(false);
+                    cancelPolygon();
+                    setAddingDoor(false);
+                    cancelWall();
+                    exitAoe();
+                  }}
+                  className="min-h-12 rounded-lg bg-neutral-900 px-3 text-left text-sm text-neutral-200"
+                >
+                  Free distance
+                  <span className="block text-[10px] text-neutral-500">drag anywhere</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {fogMenu && isDM && scene.fog_enabled && (
+            <div className="pointer-events-auto rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
+              <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Fog</div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawingPolygon(true);
+                    setPolygonPoints([]);
+                    setAddingDoor(false);
+                    cancelWall();
+                    setFogMenu(false);
+                  }}
+                  className="min-h-12 rounded-lg bg-neutral-900 px-3 text-left text-sm text-neutral-200"
+                >
+                  🌫️ Hide area
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingDoor(true);
+                    cancelPolygon();
+                    cancelWall();
+                    setFogMenu(false);
+                  }}
+                  className="min-h-12 rounded-lg bg-neutral-900 px-3 text-left text-sm text-neutral-200"
+                >
+                  🚪 Door / window
+                </button>
+              </div>
+            </div>
+          )}
+
+          {drawMode && (
+            <div className="pointer-events-auto rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">Draw</span>
+                <button type="button" onClick={exitDraw} className="min-h-10 rounded-lg px-3 text-xs text-neutral-300">Done</button>
+              </div>
+              <div className="mb-2 grid grid-cols-2 gap-2">
+                {(["pen", "eraser"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDrawMode(m)}
+                    className={`min-h-11 rounded-lg capitalize ${
+                      drawMode === m ? "bg-amber-400/20 text-amber-200" : "bg-neutral-900 text-neutral-300"
+                    }`}
+                  >
+                    {m === "pen" ? "✏️ Pen" : "⌫ Eraser"}
+                  </button>
+                ))}
+              </div>
+              {drawMode === "pen" && (
+                <div className="mb-2 flex flex-wrap gap-3 rounded-lg bg-neutral-900 p-3">
+                  {DRAW_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      type="button"
+                      aria-label={`Pen color ${color}`}
+                      onClick={() => setDrawColor(color)}
+                      style={{ background: color }}
+                      className={`h-9 w-9 rounded-full ${
+                        drawColor === color ? "ring-2 ring-white ring-offset-2 ring-offset-neutral-950" : ""
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-3 gap-2">
+                <button type="button" onClick={undoMyDrawing} className="min-h-11 rounded-lg bg-neutral-900 text-xs text-neutral-300">Undo</button>
+                <button type="button" onClick={() => clearDrawings(false)} className="min-h-11 rounded-lg bg-neutral-900 text-xs text-neutral-300">Clear mine</button>
+                {isDM ? (
+                  <button type="button" onClick={() => clearDrawings(true)} className="min-h-11 rounded-lg bg-neutral-900 text-xs text-red-300">Clear all</button>
+                ) : <span />}
+              </div>
+            </div>
+          )}
+
+          {mobileToolMore && (
+            <div className="pointer-events-auto rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
+              <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">More tools</div>
+              <div className="grid grid-cols-3 gap-2">
+                {(["cone", "line", "cube", "circle"] as const).map((shape) => (
+                  <button
+                    key={shape}
+                    type="button"
+                    onClick={() => {
+                      exitMeasure();
+                      cancelPolygon();
+                      setAddingDoor(false);
+                      cancelWall();
+                      exitDraw();
+                      setSelectMode(false);
+                      setAoeMode(shape);
+                      setMobileToolMore(false);
+                    }}
+                    className="min-h-11 rounded-lg bg-neutral-900 px-2 text-xs capitalize text-neutral-300"
+                  >
+                    📐 {shape}
+                  </button>
+                ))}
+                {isDM && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exitMeasure();
+                      cancelPolygon();
+                      setAddingDoor(false);
+                      exitAoe();
+                      exitDraw();
+                      setSelectMode(false);
+                      setDrawingWall(true);
+                      setWallPoints([]);
+                      setMobileToolMore(false);
+                      toast.info("Tap points to outline a wall");
+                    }}
+                    className="min-h-11 rounded-lg bg-neutral-900 px-2 text-xs text-neutral-300"
+                  >
+                    🧱 Wall
+                  </button>
+                )}
+                <button type="button" onClick={() => zoomBy(1 / 1.25)} className="min-h-11 rounded-lg bg-neutral-900 text-sm text-neutral-300">− Zoom</button>
+                <button type="button" onClick={() => zoomBy(1.25)} className="min-h-11 rounded-lg bg-neutral-900 text-sm text-neutral-300">+ Zoom</button>
+              </div>
+            </div>
+          )}
+
+          {(drawingPolygon || addingDoor || drawingWall || aoeMode || measuring) && !measureMenu && !fogMenu && !drawMode && !mobileToolMore && (
+            <div className="pointer-events-auto flex flex-wrap gap-2 rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
+              {drawingPolygon && polygonPoints.length > 0 && (
+                <button type="button" onClick={undoPolygonPoint} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Undo point</button>
+              )}
+              {drawingPolygon && polygonPoints.length >= 3 && (
+                <button type="button" onClick={() => void finishPolygon()} className="min-h-11 rounded-lg bg-emerald-900/40 px-3 text-xs text-emerald-300">Finish area</button>
+              )}
+              {drawingPolygon && (
+                <button type="button" onClick={cancelPolygon} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Cancel</button>
+              )}
+              {addingDoor && (
+                <button type="button" onClick={() => setAddingDoor(false)} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Done door</button>
+              )}
+              {drawingWall && wallPoints.length > 0 && (
+                <button type="button" onClick={undoWallPoint} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Undo point</button>
+              )}
+              {drawingWall && wallPoints.length >= 3 && (
+                <button type="button" onClick={() => void finishWall()} className="min-h-11 rounded-lg bg-emerald-900/40 px-3 text-xs text-emerald-300">Finish wall</button>
+              )}
+              {drawingWall && (
+                <button type="button" onClick={cancelWall} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Cancel wall</button>
+              )}
+              {aoeMode && (
+                <button type="button" onClick={exitAoe} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Done AOE</button>
+              )}
+              {measuring && (
+                <button type="button" onClick={exitMeasure} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Done measure</button>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {isDM && selectedToken && (
