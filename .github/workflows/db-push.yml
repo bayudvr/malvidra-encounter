@@ -1,0 +1,29 @@
+name: DB Push
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type PUSH to apply all Supabase migrations'
+        required: true
+        type: string
+
+jobs:
+  migrate:
+    if: ${{ github.event.inputs.confirm == 'PUSH' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply database migrations
+        run: npm run db:push
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
