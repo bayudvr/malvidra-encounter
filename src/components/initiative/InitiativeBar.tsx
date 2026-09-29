@@ -30,6 +30,12 @@ export function InitiativeBar({
   const isDM = room.role === "dm";
   const list = room.combatants;
   const activeId = scene.active_combatant_id;
+  const activeCombatant = list.find((c) => c.id === activeId) ?? null;
+  const isOwnTurn =
+    !isDM &&
+    !!activeCombatant &&
+    activeCombatant.is_player &&
+    activeCombatant.user_id === room.userId;
 
   const tokenById = useMemo(
     () => new Map(room.tokens.map((t) => [t.id, t])),
@@ -63,6 +69,14 @@ export function InitiativeBar({
     });
   }
 
+  async function endOwnTurn() {
+    if (!isOwnTurn) return;
+    const { error } = await room.supabase.rpc("end_own_turn", {
+      p_scene: scene.id,
+    });
+    if (error) toast.error(error.message);
+  }
+
   function nextRound() {
     if (!isDM || list.length === 0) return;
     const top = [...list].sort(
@@ -76,12 +90,13 @@ export function InitiativeBar({
   if (list.length === 0) return null;
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-stretch gap-1.5 rounded-xl border border-neutral-700 bg-neutral-900/90 p-1.5 shadow-xl backdrop-blur">
-      <span className="flex items-center px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-        R{scene.round}
-      </span>
+    <div className="pointer-events-auto absolute left-1/2 top-2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-col gap-1 rounded-xl border border-neutral-700 bg-neutral-900/90 p-1.5 shadow-xl backdrop-blur">
+      <div className="flex min-w-0 items-stretch gap-1.5">
+        <span className="flex items-center px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+          R{scene.round}
+        </span>
 
-      <ul className="flex items-stretch gap-1 overflow-x-auto">
+        <ul className="flex min-w-0 items-stretch gap-1 overflow-x-auto">
         {list.map((c) => {
           const tok = c.token_id ? tokenById.get(c.token_id) : null;
           const showStats = isDM || c.is_player;
@@ -177,22 +192,46 @@ export function InitiativeBar({
         })}
       </ul>
 
-      {isDM && (
-        <div className="flex flex-col justify-center gap-1 pl-0.5">
-          <button
-            type="button"
-            onClick={nextTurn}
-            className="rounded bg-amber-500 px-2 py-1 text-[11px] font-semibold text-neutral-950 hover:bg-amber-400"
-          >
-            Next ▸
-          </button>
-          <button
-            type="button"
-            onClick={nextRound}
-            className="rounded bg-neutral-700 px-2 py-1 text-[11px] font-medium text-neutral-100 hover:bg-neutral-600"
-          >
-            ↻ Round
-          </button>
+        {isDM && (
+          <div className="flex flex-col justify-center gap-1 pl-0.5">
+            <button
+              type="button"
+              onClick={nextTurn}
+              className="rounded bg-amber-500 px-2 py-1 text-[11px] font-semibold text-neutral-950 hover:bg-amber-400"
+            >
+              Next ▸
+            </button>
+            <button
+              type="button"
+              onClick={nextRound}
+              className="rounded bg-neutral-700 px-2 py-1 text-[11px] font-medium text-neutral-100 hover:bg-neutral-600"
+            >
+              ↻ Round
+            </button>
+          </div>
+        )}
+      </div>
+
+      {activeCombatant && (
+        <div
+          className={`flex min-h-8 items-center justify-between gap-2 rounded-lg border px-2 py-1 text-[11px] ${
+            isOwnTurn
+              ? "border-amber-400/60 bg-amber-400/15 text-amber-200"
+              : "border-neutral-800 bg-neutral-950/70 text-neutral-400"
+          }`}
+        >
+          <span className="min-w-0 truncate font-semibold">
+            {isOwnTurn ? "⚔ Your Turn" : `Turn: ${activeCombatant.name}`}
+          </span>
+          {isOwnTurn && (
+            <button
+              type="button"
+              onClick={() => void endOwnTurn()}
+              className="shrink-0 rounded-md bg-amber-500 px-3 py-1 font-bold text-neutral-950 hover:bg-amber-400"
+            >
+              End Turn
+            </button>
+          )}
         </div>
       )}
     </div>
