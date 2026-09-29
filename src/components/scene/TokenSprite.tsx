@@ -35,6 +35,7 @@ export function TokenSprite({
   draggable,
   owned,
   selected,
+  activeTurn,
   combatant,
   revealStats,
   speechText,
@@ -49,6 +50,8 @@ export function TokenSprite({
   draggable: boolean;
   owned: boolean;
   selected: boolean;
+  /** This token belongs to the scene's current active combatant. */
+  activeTurn?: boolean;
   /** Linked combatant during combat, if any. */
   combatant?: Combatant | null;
   /** Whether this viewer may see the combatant's HP / AC numbers. */
@@ -142,6 +145,25 @@ export function TokenSprite({
         onDragEnd(e.target.x(), e.target.y());
       }}
     >
+      {activeTurn && (
+        <>
+          <Circle
+            radius={radius + 10}
+            stroke="#facc15"
+            strokeWidth={4}
+            opacity={0.9}
+            dash={[10, 5]}
+            listening={false}
+          />
+          <Circle
+            radius={radius + 5}
+            stroke="#f59e0b"
+            strokeWidth={2}
+            opacity={0.7}
+            listening={false}
+          />
+        </>
+      )}
       {(owned || selected) && (
         <Circle
           radius={radius + 4}
