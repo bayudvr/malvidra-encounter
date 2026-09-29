@@ -63,6 +63,7 @@ export function RoomView({
   }, [room.kicked, router]);
 
   const [drawerState, setDrawer] = useState<Drawer>(null);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   // The initiative editor drawer is the DM's, and only during combat.
   const drawer =
     drawerState === "initiative" && !(inCombat && isDM) ? null : drawerState;
@@ -71,7 +72,7 @@ export function RoomView({
     <div className="flex h-dvh flex-col">
       <DiceTray room={room} />
       <ChatBox room={room} />
-      <header className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2 sm:px-4">
+      <header className="relative flex items-center justify-between gap-2 border-b border-neutral-800 px-2 py-1.5 sm:px-4 sm:py-2">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
@@ -99,60 +100,85 @@ export function RoomView({
             </span>
           )}
         </div>
-        {/* This row keeps growing (ModeToggle, Notes, 5e Reference, Encounter Builder, Cast,
-            Player Requests, + a combat-only Combatants toggle) — shrink-0 with no wrap/scroll
-            meant it just overflowed off-screen on a phone once there were enough DM buttons to
-            not fit, crushing/hiding whatever it could of the room name on the left instead of
-            reflowing. Capped + internally scrollable on narrow screens; back to the untouched
-            fixed-width row from sm: up. */}
-        <div className="flex max-w-[60vw] shrink items-center gap-1.5 overflow-x-auto sm:max-w-none sm:shrink-0 sm:gap-2">
-          {/* Each button wrapped in its own shrink-0 span — otherwise the flex children would
-              squeeze/wrap their own labels to fit instead of the row just scrolling. */}
-          {isDM && scene && (
-            <span className="shrink-0">
-              <ModeToggle room={room} scene={scene} />
+        {/* Mobile keeps the header intentionally tiny. DM utilities live behind one menu;
+            desktop keeps the familiar full action row. */}
+        <div className="flex items-center gap-1 sm:hidden">
+          {inCombat && scene && (
+            <span className="rounded-md bg-red-950/60 px-2 py-1 text-[10px] font-semibold text-red-300">
+              ⚔ R{scene.round}
             </span>
           )}
+          <button
+            type="button"
+            onClick={() => setMobileActionsOpen((v) => !v)}
+            aria-label="DM actions"
+            aria-expanded={mobileActionsOpen}
+            className="grid min-h-10 min-w-10 place-items-center rounded-lg border border-neutral-800 bg-neutral-900 text-xl text-neutral-300"
+          >
+            ⋮
+          </button>
+        </div>
+
+        <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          {isDM && scene && <ModeToggle room={room} scene={scene} />}
+          {isDM && <NotesPanel room={room} isDM={isDM} />}
+          {isDM && <ReferencePanel room={room} isDM={isDM} />}
+          {isDM && <EncounterBuilderPanel room={room} isDM={isDM} />}
           {isDM && (
-            <span className="shrink-0">
-              <NotesPanel room={room} isDM={isDM} />
-            </span>
+            <CastControls roomId={roomId} castToken={room.room?.cast_token} />
           )}
-          {isDM && (
-            <span className="shrink-0">
-              <ReferencePanel room={room} isDM={isDM} />
-            </span>
-          )}
-          {isDM && (
-            <span className="shrink-0">
-              <EncounterBuilderPanel room={room} isDM={isDM} />
-            </span>
-          )}
-          {isDM && (
-            <span className="shrink-0">
-              <CastControls roomId={roomId} castToken={room.room?.cast_token} />
-            </span>
-          )}
-          {!isDM && (
-            <span className="hidden shrink-0 text-xs text-sky-300 sm:inline">
-              Player view
-            </span>
-          )}
-          <span className="shrink-0">
-            <PlayerRequests room={room} isDM={isDM} />
-          </span>
+          {!isDM && <span className="text-xs text-sky-300">Player view</span>}
+          <PlayerRequests room={room} isDM={isDM} />
           {inCombat && isDM && (
             <button
               type="button"
               onClick={() =>
                 setDrawer((d) => (d === "initiative" ? null : "initiative"))
               }
-              className="shrink-0 rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 lg:hidden"
+              className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 lg:hidden"
             >
               Combatants
             </button>
           )}
         </div>
+
+        {mobileActionsOpen && (
+          <>
+            <button
+              type="button"
+              aria-label="Close DM actions"
+              onClick={() => setMobileActionsOpen(false)}
+              className="absolute inset-x-0 top-full z-40 h-[100dvh] bg-black/40 sm:hidden"
+            />
+            <div className="absolute right-2 top-[calc(100%+0.35rem)] z-50 w-64 rounded-xl border border-neutral-700 bg-neutral-950 p-2 shadow-2xl sm:hidden">
+              <div className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                {isDM ? "DM controls" : "Room controls"}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {isDM && scene && <ModeToggle room={room} scene={scene} />}
+                {isDM && <NotesPanel room={room} isDM={isDM} />}
+                {isDM && <ReferencePanel room={room} isDM={isDM} />}
+                {isDM && <EncounterBuilderPanel room={room} isDM={isDM} />}
+                {isDM && (
+                  <CastControls roomId={roomId} castToken={room.room?.cast_token} />
+                )}
+                <PlayerRequests room={room} isDM={isDM} />
+                {inCombat && isDM && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDrawer("initiative");
+                      setMobileActionsOpen(false);
+                    }}
+                    className="min-h-10 rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-200"
+                  >
+                    ⚔ Combatants
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </header>
 
       {scene && (scene.spotlight_user_id || scene.spotlight_note) && (
