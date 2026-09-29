@@ -18,6 +18,7 @@ import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
 import { rollLoot, type LootResult } from "@/lib/loot";
 import { stripTags } from "@/lib/reference/render";
+import { CONDITION_PRESETS, conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type {
   Combatant,
@@ -2799,7 +2800,7 @@ export function SceneCanvas({
       )}
 
       {!isDM && selectedToken && selectedToken.owner_user_id === room.userId && (
-        <TokenAuraPanel
+        <PlayerTokenPanel
           key={selectedToken.id}
           room={room}
           token={selectedToken}
@@ -3589,12 +3590,11 @@ function TokenInspector({
   );
 }
 
-// A player's minimal counterpart to TokenInspector's aura section, scoped to
-// a token they own — everything else in TokenInspector (label/owner/HP/AC/
-// counters/loot/remove) stays DM-only. RLS (token_auras_write, 0025) is the
-// actual enforcement; this just doesn't offer controls the server would
-// reject anyway.
-function TokenAuraPanel({
+// Player-owned token controls. Mobile-first: on narrow screens this is a bottom sheet with
+// large tap targets; at sm+ it becomes a compact floating panel. Combat mutations go through
+// SECURITY DEFINER RPCs from migration 0028 so a player never gets broad UPDATE access to the
+// combatants table.
+function PlayerTokenPanel({
   room,
   token,
   onClose,
@@ -3604,8 +3604,39 @@ function TokenAuraPanel({
   onClose: () => void;
 }) {
   const toast = useToast();
-  const { style: dragStyle, dragHandleProps } = usePanelDrag(token.id);
   const auras = room.tokenAuras.filter((a) => a.token_id === token.id);
+  const combatant = room.combatants.find((c) => c.token_id === token.id) ?? null;
+  const [hpDelta, setHpDelta] = useState("");
+
+  async function adjustHp(delta: number) {
+    if (!combatant || delta === 0) return;
+    const { error } = await room.supabase.rpc("adjust_own_combatant_hp", {
+      p_combatant: combatant.id,
+      p_delta: delta,
+    });
+    if (error) toast.error(error.message);
+  }
+
+  async function commitHpDelta() {
+    const raw = hpDelta.trim();
+    if (!raw) return;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed === 0) {
+      toast.error("Enter a number like -7 or 5");
+      return;
+    }
+    setHpDelta("");
+    await adjustHp(Math.trunc(parsed));
+  }
+
+  async function toggleCondition(name: string) {
+    if (!combatant) return;
+    const { error } = await room.supabase.rpc("toggle_own_combatant_condition", {
+      p_combatant: combatant.id,
+      p_condition: name,
+    });
+    if (error) toast.error(error.message);
+  }
 
   async function addAura() {
     const { error } = await room.supabase.from("token_auras").insert({
@@ -3622,68 +3653,197 @@ function TokenAuraPanel({
   async function updateAura(id: string, patch: { radius_ft?: number; color?: string }) {
     const { error } = await room.supabase.from("token_auras").update(patch).eq("id", id);
     if (error) toast.error(error.message);
-    else room.reloadScene();
   }
 
   async function removeAura(id: string) {
     const { error } = await room.supabase.from("token_auras").delete().eq("id", id);
     if (error) toast.error(error.message);
-    else room.reloadScene();
   }
 
+  const hp = combatant?.hp ?? null;
+  const maxHp = combatant?.max_hp ?? null;
+  const tempHp = combatant?.temp_hp ?? 0;
+  const hpPct =
+    hp != null && maxHp != null && maxHp > 0
+      ? Math.max(0, Math.min(100, (hp / maxHp) * 100))
+      : 0;
+
   return (
-    <div
-      style={dragStyle}
-      className="absolute right-2 top-2 w-60 rounded-lg border border-neutral-700 bg-neutral-900 p-3 text-sm shadow-xl"
-    >
-      <div
-        {...dragHandleProps}
-        className="mb-2 flex cursor-move touch-none items-center justify-between"
-      >
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-          {token.label} — Aura
-        </span>
-        <button className="text-neutral-500 hover:text-neutral-200" onClick={onClose}>
+    <div className="absolute inset-x-2 bottom-2 z-30 max-h-[72%] overflow-y-auto rounded-xl border border-neutral-700 bg-neutral-900/95 p-3 text-sm shadow-xl backdrop-blur sm:inset-x-auto sm:bottom-auto sm:right-2 sm:top-2 sm:w-72 sm:max-h-[calc(100%-1rem)]">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-semibold text-neutral-100">{token.label}</div>
+          <div className="text-xs text-neutral-500">Your token</div>
+        </div>
+        <button
+          type="button"
+          aria-label="Close token controls"
+          onClick={onClose}
+          className="grid min-h-11 min-w-11 place-items-center rounded-lg text-lg text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
+        >
           ✕
         </button>
       </div>
 
-      {auras.map((a) => (
-        <div key={a.id} className="mb-1 flex items-center gap-1">
-          <input
-            type="color"
-            value={a.color}
-            onChange={(e) => updateAura(a.id, { color: e.target.value })}
-            className="h-6 w-6 shrink-0 rounded border border-neutral-700 bg-neutral-950"
-            aria-label="Aura color"
-          />
-          <input
-            type="number"
-            min={0}
-            step={5}
-            value={a.radius_ft}
-            onChange={(e) => updateAura(a.id, { radius_ft: Number(e.target.value) })}
-            className="w-14 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-xs text-neutral-200"
-          />
-          <span className="text-xs text-neutral-500">ft</span>
+      {combatant ? (
+        <section className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3">
+          <div className="mb-2 flex items-end justify-between gap-2">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                Hit points
+              </div>
+              <div className="text-xl font-bold text-neutral-100">
+                {hp ?? "?"}
+                {maxHp != null && <span className="text-sm font-normal text-neutral-500"> / {maxHp}</span>}
+                {tempHp > 0 && <span className="ml-2 text-sm text-sky-300">+{tempHp} THP</span>}
+              </div>
+            </div>
+          </div>
+
+          {maxHp != null && hp != null && (
+            <div className="mb-3 h-2 overflow-hidden rounded-full bg-neutral-800">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-[width]"
+                style={{ width: `${hpPct}%` }}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-4 gap-2">
+            {[-5, -1, 1, 5].map((delta) => (
+              <button
+                key={delta}
+                type="button"
+                onClick={() => adjustHp(delta)}
+                className={`min-h-11 rounded-lg border px-2 text-sm font-semibold active:scale-[0.98] ${
+                  delta < 0
+                    ? "border-red-900/70 bg-red-950/40 text-red-300"
+                    : "border-emerald-900/70 bg-emerald-950/40 text-emerald-300"
+                }`}
+              >
+                {delta > 0 ? `+${delta}` : delta}
+              </button>
+            ))}
+          </div>
+
+          <form
+            className="mt-2 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void commitHpDelta();
+            }}
+          >
+            <input
+              type="text"
+              inputMode="numeric"
+              value={hpDelta}
+              onChange={(e) => setHpDelta(e.target.value)}
+              placeholder="-7 damage / 5 heal"
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-900 px-3 text-base text-neutral-100 placeholder:text-neutral-600"
+            />
+            <button
+              type="submit"
+              className="min-h-11 rounded-lg bg-amber-500 px-4 font-semibold text-neutral-950"
+            >
+              Apply
+            </button>
+          </form>
+          <p className="mt-1 text-[11px] text-neutral-600">
+            Damage uses temporary HP first. Healing stops at max HP.
+          </p>
+        </section>
+      ) : (
+        <div className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3 text-xs text-neutral-500">
+          HP and conditions become available when this token is in combat.
+        </div>
+      )}
+
+      {combatant && (
+        <section className="mb-4">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+            Conditions
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-2">
+            {CONDITION_PRESETS.map((cond) => {
+              const active = combatant.conditions.includes(cond.name);
+              return (
+                <button
+                  key={cond.name}
+                  type="button"
+                  onClick={() => toggleCondition(cond.name)}
+                  className={`min-h-11 rounded-lg border px-2 text-left text-xs font-medium active:scale-[0.99] ${
+                    active
+                      ? "border-current bg-neutral-800 text-neutral-100"
+                      : "border-neutral-800 bg-neutral-950 text-neutral-400"
+                  }`}
+                  style={active ? { color: conditionColor(cond.name) } : undefined}
+                >
+                  <span
+                    className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ background: conditionColor(cond.name) }}
+                  />
+                  {cond.name}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+            Aura
+          </div>
           <button
             type="button"
-            onClick={() => removeAura(a.id)}
-            title="Remove"
-            className="ml-auto text-neutral-500 hover:text-red-400"
+            onClick={addAura}
+            className="min-h-11 rounded-lg border border-neutral-700 px-3 text-xs font-medium text-amber-300"
           >
-            ✕
+            + Add aura
           </button>
         </div>
-      ))}
 
-      <button
-        type="button"
-        onClick={addAura}
-        className="mt-1 w-full rounded border border-neutral-700 px-2 py-1 text-xs text-amber-300 hover:bg-neutral-800"
-      >
-        + Add aura
-      </button>
+        {auras.length === 0 && (
+          <p className="text-xs text-neutral-600">No aura attached.</p>
+        )}
+
+        <div className="space-y-2">
+          {auras.map((a) => (
+            <div key={a.id} className="flex items-center gap-2 rounded-lg border border-neutral-800 bg-neutral-950 p-2">
+              <input
+                type="color"
+                value={a.color}
+                onChange={(e) => updateAura(a.id, { color: e.target.value })}
+                className="h-11 w-11 shrink-0 rounded border border-neutral-700 bg-neutral-950"
+                aria-label="Aura color"
+              />
+              <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-neutral-500">
+                Radius
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={5}
+                  value={a.radius_ft}
+                  onChange={(e) => updateAura(a.id, { radius_ft: Number(e.target.value) })}
+                  className="min-h-11 min-w-0 w-full rounded border border-neutral-700 bg-neutral-900 px-2 text-base text-neutral-200"
+                />
+                ft
+              </label>
+              <button
+                type="button"
+                onClick={() => removeAura(a.id)}
+                aria-label="Remove aura"
+                className="grid min-h-11 min-w-11 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
+
