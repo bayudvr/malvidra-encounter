@@ -181,8 +181,9 @@ export function RoomView({
       )}
 
       <div className="relative flex min-h-0 flex-1">
-        {/* Backdrop for mobile drawers */}
-        {drawer && (
+        {/* The left navigation drawer blocks the canvas on mobile. Combatants does not:
+            it becomes a bottom sheet so the map stays visible and usable above it. */}
+        {drawer === "panels" && (
           <button
             type="button"
             aria-label="Close panel"
@@ -233,15 +234,20 @@ export function RoomView({
         {/* DM's combatant editor: drawer on mobile, static column on desktop */}
         {inCombat && isDM && scene && (
           <aside
-            className={`absolute inset-y-0 right-0 z-40 w-[85vw] max-w-xs overflow-y-auto border-l border-neutral-800 bg-neutral-950 p-3 transition-transform lg:static lg:z-auto lg:w-80 lg:max-w-none lg:translate-x-0 lg:bg-transparent lg:transition-none ${
-              drawer === "initiative" ? "translate-x-0" : "translate-x-full"
-            }`}
+            className={`absolute inset-x-2 bottom-2 z-40 max-h-[64dvh] overflow-y-auto rounded-xl border border-neutral-700 bg-neutral-950/95 p-3 shadow-2xl backdrop-blur transition-transform duration-200 lg:static lg:inset-auto lg:z-auto lg:max-h-none lg:w-80 lg:rounded-none lg:border-y-0 lg:border-r-0 lg:border-l lg:border-neutral-800 lg:bg-transparent lg:shadow-none lg:backdrop-blur-none lg:transition-none ${
+              drawer === "initiative"
+                ? "translate-y-0"
+                : "translate-y-[calc(100%+1rem)]"
+            } lg:translate-y-0`}
           >
-            <div className="mb-2 flex justify-end lg:hidden">
+            <div className="mb-2 flex items-center justify-between lg:hidden">
+              <div className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+                Combatants
+              </div>
               <button
                 type="button"
                 onClick={() => setDrawer(null)}
-                className="rounded-md p-1 text-neutral-500 hover:text-neutral-200"
+                className="grid min-h-10 min-w-10 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
                 aria-label="Close combatants"
               >
                 ✕
