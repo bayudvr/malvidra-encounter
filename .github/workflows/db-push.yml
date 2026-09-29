@@ -1,16 +1,25 @@
 name: DB Push
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'supabase/migrations/**'
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Type PUSH to apply all Supabase migrations'
+        description: 'Type PUSH to apply pending Supabase migrations'
         required: true
         type: string
 
+concurrency:
+  group: malvidra-encounter-db-push
+  cancel-in-progress: false
+
 jobs:
   migrate:
-    if: ${{ github.event.inputs.confirm == 'PUSH' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.confirm == 'PUSH' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -23,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Apply database migrations
+      - name: Apply pending database migrations
         run: npm run db:push
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
