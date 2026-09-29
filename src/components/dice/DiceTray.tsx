@@ -378,13 +378,13 @@ export function DiceTray({ room }: { room: RoomStore }) {
         type="button"
         onClick={() => (open ? closeTray() : setOpen(true))}
         aria-label="Dice roller"
-        className="fixed bottom-4 right-4 z-[62] flex h-12 w-12 items-center justify-center rounded-full border border-neutral-700 bg-neutral-900 text-xl shadow-lg transition-colors hover:bg-neutral-800"
+        className="fixed bottom-3 right-2 z-[62] flex h-10 w-10 items-center justify-center rounded-b-xl rounded-t-md border border-neutral-700 bg-neutral-900/95 text-lg shadow-lg backdrop-blur transition-colors hover:bg-neutral-800 sm:bottom-4 sm:right-4 sm:h-12 sm:w-12 sm:rounded-full sm:text-xl"
       >
         🎲
       </button>
 
       {open && (
-        <div className="fixed bottom-20 right-4 z-[62] flex max-h-[70vh] w-[17rem] flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl">
+        <div className="fixed inset-x-2 bottom-16 z-[62] flex max-h-[72%] flex-col rounded-xl border border-neutral-700 bg-neutral-900 shadow-2xl sm:inset-x-auto sm:bottom-20 sm:right-4 sm:max-h-[70vh] sm:w-[17rem]">
           <div className="flex items-center justify-between gap-2 border-b border-neutral-800 px-3 py-2">
             <span className="shrink-0 text-xs font-semibold uppercase tracking-wide text-neutral-400">
               Dice roller
