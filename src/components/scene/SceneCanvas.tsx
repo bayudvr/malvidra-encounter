@@ -2788,7 +2788,6 @@ export function SceneCanvas({
                   lineWidthPx={(r.lineWidthFt / scene.feet_per_square) * scene.grid_size}
                   feetFromPixels={feetFromPixels}
                   viewScale={view.scale}
-                  gridSize={scene.grid_size}
                 />
                 <Text
                   text={r.authorName}
@@ -2839,6 +2838,7 @@ export function SceneCanvas({
                   cover={hint}
                   feet={feetBetween(source.x, source.y, target.x, target.y)}
                   viewScale={view.scale}
+                  gridSize={scene.grid_size}
                 />
               );
             })}
