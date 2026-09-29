@@ -293,6 +293,7 @@ export function SceneCanvas({
   } | null>(null);
   const [measuring, setMeasuring] = useState(false);
   const [measureMenu, setMeasureMenu] = useState(false);
+  const [mobileToolMore, setMobileToolMore] = useState(false);
   const measureDrawing = useRef(false);
   const lastPinch = useRef<{ dist: number; cx: number; cy: number } | null>(null);
   const didPinch = useRef(false);
@@ -2379,7 +2380,7 @@ export function SceneCanvas({
       </Stage>
 
       {!castMode && (
-      <div className="absolute bottom-2 left-2 flex items-end gap-2">
+      <div className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-end gap-1 overflow-x-auto pb-0.5 sm:max-w-none sm:gap-2 sm:overflow-visible sm:pb-0">
         <div className="relative">
           <button
             type="button"
@@ -2390,7 +2391,7 @@ export function SceneCanvas({
                 : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
             }`}
           >
-            📏 {measuring ? "Measuring…" : "Measure"}
+            <span aria-hidden="true">📏</span><span className="hidden sm:inline"> {measuring ? "Measuring…" : "Measure"}</span>
           </button>
 
           {measureMenu && (
@@ -2460,12 +2461,15 @@ export function SceneCanvas({
                   : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
               }`}
             >
-              🌫️{" "}
-              {drawingPolygon
-                ? "Outlining area…"
-                : addingDoor
-                  ? "Click an edge…"
-                  : "Fog"}
+              <span aria-hidden="true">🌫️</span>
+              <span className="hidden sm:inline">
+                {" "}
+                {drawingPolygon
+                  ? "Outlining area…"
+                  : addingDoor
+                    ? "Click an edge…"
+                    : "Fog"}
+              </span>
             </button>
 
             {fogMenu && (
@@ -2538,7 +2542,7 @@ export function SceneCanvas({
           </div>
         )}
 
-        <div className="relative flex items-end gap-1">
+        <div className="relative hidden items-end gap-1 sm:flex">
           <button
             type="button"
             onClick={() => {
@@ -2627,7 +2631,7 @@ export function SceneCanvas({
                 : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
             }`}
           >
-            ⬚ {selectMode ? "Selecting…" : "Select"}
+            <span aria-hidden="true">⬚</span><span className="hidden sm:inline"> {selectMode ? "Selecting…" : "Select"}</span>
           </button>
         )}
 
@@ -2653,7 +2657,7 @@ export function SceneCanvas({
                 : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
             }`}
           >
-            ✏️ {drawMode ? "Drawing…" : "Draw"}
+            <span aria-hidden="true">✏️</span><span className="hidden sm:inline"> {drawMode ? "Drawing…" : "Draw"}</span>
           </button>
 
           {drawMode && (
@@ -2709,7 +2713,7 @@ export function SceneCanvas({
         </div>
 
         {isDM && (
-          <div className="relative flex items-end gap-1">
+          <div className="relative hidden items-end gap-1 sm:flex">
             <button
               type="button"
               onClick={() => {
@@ -2766,7 +2770,107 @@ export function SceneCanvas({
           </div>
         )}
 
-        <div className="flex items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200">
+        <div className="relative sm:hidden">
+          <button
+            type="button"
+            aria-label="More map tools"
+            aria-expanded={mobileToolMore}
+            onClick={() => setMobileToolMore((v) => !v)}
+            className="min-h-9 rounded-md border border-neutral-700 bg-neutral-900/90 px-2 text-sm font-bold text-neutral-200 shadow"
+          >
+            •••
+          </button>
+
+          {mobileToolMore && (
+            <div className="absolute bottom-full right-0 mb-1 w-52 overflow-hidden rounded-xl border border-neutral-700 bg-neutral-950 p-1 text-xs shadow-2xl">
+              <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                More tools
+              </div>
+
+              <div className="grid grid-cols-2 gap-1">
+                {(["cone", "line", "cube", "circle"] as const).map((shape) => (
+                  <button
+                    key={shape}
+                    type="button"
+                    onClick={() => {
+                      exitMeasure();
+                      cancelPolygon();
+                      setAddingDoor(false);
+                      cancelWall();
+                      exitDraw();
+                      setSelectMode(false);
+                      setAoeMode(shape);
+                      setMobileToolMore(false);
+                    }}
+                    className={`min-h-10 rounded-lg px-2 capitalize ${
+                      aoeMode === shape
+                        ? "bg-amber-400/20 text-amber-200"
+                        : "bg-neutral-900 text-neutral-300"
+                    }`}
+                  >
+                    📐 {shape}
+                  </button>
+                ))}
+
+                {isDM && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exitMeasure();
+                      cancelPolygon();
+                      setAddingDoor(false);
+                      exitAoe();
+                      exitDraw();
+                      setSelectMode(false);
+                      setDrawingWall(true);
+                      setWallPoints([]);
+                      setMobileToolMore(false);
+                      toast.info("Tap points to outline a wall");
+                    }}
+                    className={`min-h-10 rounded-lg px-2 ${
+                      drawingWall
+                        ? "bg-amber-400/20 text-amber-200"
+                        : "bg-neutral-900 text-neutral-300"
+                    }`}
+                  >
+                    🧱 Wall
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => zoomBy(1 / 1.25)}
+                  className="min-h-10 rounded-lg bg-neutral-900 px-2 text-neutral-300"
+                >
+                  − Zoom
+                </button>
+                <button
+                  type="button"
+                  onClick={() => zoomBy(1.25)}
+                  className="min-h-10 rounded-lg bg-neutral-900 px-2 text-neutral-300"
+                >
+                  + Zoom
+                </button>
+              </div>
+
+              {(aoeMode || drawingWall) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (aoeMode) exitAoe();
+                    if (drawingWall) cancelWall();
+                    setMobileToolMore(false);
+                  }}
+                  className="mt-1 min-h-10 w-full rounded-lg border border-neutral-700 text-neutral-300"
+                >
+                  Done active tool
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="hidden items-center overflow-hidden rounded-md border border-neutral-700 bg-neutral-900/90 text-neutral-200 sm:flex">
           <button
             type="button"
             aria-label="Zoom out"
