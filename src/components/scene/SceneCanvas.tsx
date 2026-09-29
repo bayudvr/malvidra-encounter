@@ -46,6 +46,7 @@ const DRAW_COLORS = ["#f59e0b", "#ef4444", "#22c55e", "#38bdf8", "#e879f9", "#f5
 // Pen thickness in screen px — converted to map px at the drawer's zoom when the stroke starts.
 const DRAW_WIDTH_PX = 3;
 // Live pen strokes are broadcast while drawing; the completed stroke is still persisted once.
+const DRAW_LIVE_SEND_MS = 50;
 const DRAW_LIVE_STALE_MS = 3000;
 // How long a right-click ping stays on screen.
 const PING_MS = 2500;
@@ -357,6 +358,7 @@ export function SceneCanvas({
     Map<string, { points: number[]; color: string; width: number; at: number }>
   >(new Map());
   const drawLiveChannelRef = useRef<RealtimeChannel | null>(null);
+  const drawLiveLastSent = useRef(0);
 
   // Right-click pings (Foundry-style) — broadcast-only like AOE, never stored.
   const [pings, setPings] = useState<Ping[]>([]);
@@ -635,7 +637,10 @@ export function SceneCanvas({
     };
   }, [room.supabase, scene.room_id, scene.id]);
 
-  function broadcastLiveStroke(points: number[], width: number) {
+  function broadcastLiveStroke(points: number[], width: number, force = false) {
+    const now = Date.now();
+    if (!force && now - drawLiveLastSent.current < DRAW_LIVE_SEND_MS) return;
+    drawLiveLastSent.current = now;
     drawLiveChannelRef.current?.send({
       type: "broadcast",
       event: "stroke",
@@ -962,9 +967,13 @@ export function SceneCanvas({
     strokeDrawing.current = false;
     const done = stroke;
     setStroke(null);
-    clearLiveStroke();
     // A plain click leaves a single point — draw it as a dot rather than dropping it.
-    if (!done || done.points.length < 2) return;
+    if (!done || done.points.length < 2) {
+      clearLiveStroke();
+      return;
+    }
+    // Ensure receivers get the final sampled points even if the last move fell inside the throttle.
+    broadcastLiveStroke(done.points, done.width, true);
     const points =
       done.points.length === 2 ? [...done.points, done.points[0] + 0.01, done.points[1]] : done.points;
     const drawing: SceneDrawing = {
@@ -990,6 +999,7 @@ export function SceneCanvas({
       room.removeDrawingsLocal([drawing.id]);
       toast.error(error.message);
     }
+    clearLiveStroke();
   }
 
   const canErase = (d: SceneDrawing) => isDM || d.user_id === room.userId;
@@ -1082,7 +1092,8 @@ export function SceneCanvas({
       strokeDrawing.current = true;
       const nextStroke = { points: [p.x, p.y], width: DRAW_WIDTH_PX / view.scale };
       setStroke(nextStroke);
-      broadcastLiveStroke(nextStroke.points, nextStroke.width);
+      drawLiveLastSent.current = 0;
+      broadcastLiveStroke(nextStroke.points, nextStroke.width, true);
       return;
     }
     if (drawMode === "eraser") return;
