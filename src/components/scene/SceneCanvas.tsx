@@ -1958,6 +1958,38 @@ export function SceneCanvas({
     return map;
   }, [room.combatants]);
 
+  // Ping/laser targets may be outside another viewer's current pan/zoom.
+  // Feed them to an HTML edge overlay so "over here" still has a direction.
+  const sharedPointerTargets = useMemo(() => {
+    const targets: {
+      id: string;
+      x: number;
+      y: number;
+      color: string;
+      name: string;
+      kind: "ping" | "laser";
+    }[] = pings.map((p) => ({
+      id: `ping-${p.id}`,
+      x: p.x,
+      y: p.y,
+      color: p.color,
+      name: p.name,
+      kind: "ping" as const,
+    }));
+
+    for (const [userId, laser] of remoteLasers) {
+      targets.push({
+        id: `laser-${userId}`,
+        x: laser.x,
+        y: laser.y,
+        color: laser.color,
+        name: laser.name,
+        kind: "laser",
+      });
+    }
+    return targets;
+  }, [pings, remoteLasers]);
+
   return (
     <div
       ref={wrapRef}
@@ -2563,6 +2595,13 @@ export function SceneCanvas({
           </Layer>
         )}
       </Stage>
+
+      <OffscreenPointerIndicators
+        targets={sharedPointerTargets}
+        view={view}
+        width={size.w}
+        height={size.h}
+      />
 
       {!castMode && (
       <div className="absolute bottom-2 left-2 z-20 flex items-end gap-1 sm:gap-2">
@@ -3269,6 +3308,129 @@ export function SceneCanvas({
           onClose={() => setSelectedIds([])}
         />
       )}
+    </div>
+  );
+}
+
+// Shared laser marker. Screen-sized so it stays readable regardless of map zoom.
+function LaserMarker({
+  laser,
+  viewScale,
+}: {
+  laser: LaserPointer;
+  viewScale: number;
+}) {
+  const k = 1 / viewScale;
+  return (
+    <Group x={laser.x} y={laser.y} listening={false}>
+      <Circle
+        radius={8 * k}
+        fill={laser.color}
+        opacity={0.22}
+      />
+      <Circle
+        radius={4 * k}
+        fill={laser.color}
+        stroke="#ffffff"
+        strokeWidth={1.5 * k}
+      />
+      <Circle
+        radius={13 * k}
+        stroke={laser.color}
+        strokeWidth={1.5 * k}
+        opacity={0.65}
+      />
+      <Text
+        text={laser.name}
+        x={12 * k}
+        y={-18 * k}
+        fontSize={11 * k}
+        fontStyle="bold"
+        fill={laser.color}
+      />
+    </Group>
+  );
+}
+
+function OffscreenPointerIndicators({
+  targets,
+  view,
+  width,
+  height,
+}: {
+  targets: {
+    id: string;
+    x: number;
+    y: number;
+    color: string;
+    name: string;
+    kind: "ping" | "laser";
+  }[];
+  view: { x: number; y: number; scale: number };
+  width: number;
+  height: number;
+}) {
+  const margin = 30;
+  const cx = width / 2;
+  const cy = height / 2;
+
+  const indicators = targets.flatMap((target) => {
+    const screenX = target.x * view.scale + view.x;
+    const screenY = target.y * view.scale + view.y;
+
+    // Once the actual marker is comfortably visible, the edge hint disappears.
+    if (
+      screenX >= margin &&
+      screenX <= width - margin &&
+      screenY >= margin &&
+      screenY <= height - margin
+    ) {
+      return [];
+    }
+
+    const dx = screenX - cx;
+    const dy = screenY - cy;
+    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return [];
+
+    const tx = Math.abs(dx) > 0.001 ? Math.max(0, (cx - margin) / Math.abs(dx)) : Infinity;
+    const ty = Math.abs(dy) > 0.001 ? Math.max(0, (cy - margin) / Math.abs(dy)) : Infinity;
+    const t = Math.min(tx, ty, 1);
+    const x = cx + dx * t;
+    const y = cy + dy * t;
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+
+    return [{ ...target, edgeX: x, edgeY: y, angle }];
+  });
+
+  if (indicators.length === 0) return null;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[18] overflow-hidden">
+      {indicators.map((target) => (
+        <div
+          key={target.id}
+          className="absolute flex max-w-[9rem] items-center gap-1.5 rounded-full border bg-neutral-950/90 px-2 py-1 text-[10px] font-semibold shadow-lg backdrop-blur"
+          style={{
+            left: target.edgeX,
+            top: target.edgeY,
+            color: target.color,
+            borderColor: target.color,
+            transform: "translate(-50%, -50%)",
+          }}
+        >
+          <span
+            aria-hidden="true"
+            className="inline-block text-sm leading-none"
+            style={{ transform: `rotate(${target.angle}deg)` }}
+          >
+            ➤
+          </span>
+          <span className="truncate">
+            {target.kind === "laser" ? "🔴 " : "📍 "}
+            {target.name}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
