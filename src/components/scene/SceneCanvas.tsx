@@ -79,6 +79,9 @@ type TargetLock = {
   name: string;
   color: string;
   at: number;
+  normalRangeFt?: number | null;
+  longRangeFt?: number | null;
+  attackModifier?: number;
 };
 
 type CoverHint = {
@@ -507,6 +510,9 @@ export function SceneCanvas({
   const [targetSourceId, setTargetSourceId] = useState<string | null>(null);
   const [localTargetLock, setLocalTargetLock] = useState<TargetLock | null>(null);
   const [remoteTargetLocks, setRemoteTargetLocks] = useState<Map<string, TargetLock>>(new Map());
+  const [attackNormalRange, setAttackNormalRange] = useState("");
+  const [attackLongRange, setAttackLongRange] = useState("");
+  const [attackModifier, setAttackModifier] = useState("0");
 
   const [mapImage] = useImage(scene.map_url);
 
@@ -534,6 +540,9 @@ export function SceneCanvas({
     setTargetSourceId(null);
     setLocalTargetLock(null);
     setRemoteTargetLocks(new Map());
+    setAttackNormalRange("");
+    setAttackLongRange("");
+    setAttackModifier("0");
     fogUndo.current = [];
   }, [scene.id]);
 
@@ -1172,6 +1181,9 @@ export function SceneCanvas({
   }
 
   function beginTargetMode() {
+    setAttackNormalRange("");
+    setAttackLongRange("");
+    setAttackModifier("0");
     exitLaser();
     exitMeasure();
     exitDraw();
@@ -1195,6 +1207,73 @@ export function SceneCanvas({
       usableSelected
         ? `Targeting from ${usableSelected.label} — tap a target`
         : "Target mode — tap your attacker, then tap the target",
+    );
+  }
+
+  function numericOrNull(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+
+  function updateAttackAssist(next?: {
+    normalRangeFt?: number | null;
+    longRangeFt?: number | null;
+    attackModifier?: number;
+  }) {
+    setLocalTargetLock((lock) => {
+      if (!lock) return lock;
+      const updated: TargetLock = {
+        ...lock,
+        ...next,
+        at: Date.now(),
+      };
+      pingChannelRef.current?.send({
+        type: "broadcast",
+        event: "target-set",
+        payload: {
+          ...updated,
+          userId: room.userId,
+          sceneId: scene.id,
+        },
+      });
+      return updated;
+    });
+  }
+
+  function attackRangeStatus(distanceFt: number, lock: TargetLock) {
+    const normal = lock.normalRangeFt ?? null;
+    const long = lock.longRangeFt ?? null;
+    if (normal == null || normal <= 0) {
+      return { label: "Range not set", tone: "#a3a3a3", advMode: "normal" as const };
+    }
+    if (distanceFt <= normal) {
+      return { label: "In Range", tone: "#22c55e", advMode: "normal" as const };
+    }
+    if (long != null && long > normal && distanceFt <= long) {
+      return { label: "Long Range", tone: "#f59e0b", advMode: "dis" as const };
+    }
+    return { label: "Out of Range", tone: "#ef4444", advMode: "normal" as const };
+  }
+
+  function openAttackRoll() {
+    if (!localTargetLock) return;
+    const source = room.tokens.find((t) => t.id === localTargetLock.sourceId);
+    const target = room.tokens.find((t) => t.id === localTargetLock.targetId);
+    if (!source || !target) return;
+    const distance = feetBetween(source.x, source.y, target.x, target.y);
+    const range = attackRangeStatus(distance, localTargetLock);
+    const modifier = Number(localTargetLock.attackModifier ?? 0);
+    window.dispatchEvent(
+      new CustomEvent("mv:dice-prefill", {
+        detail: {
+          sides: 20,
+          count: 1,
+          modifier: Number.isFinite(modifier) ? modifier : 0,
+          advMode: range.advMode,
+        },
+      }),
     );
   }
 
@@ -1229,6 +1308,9 @@ export function SceneCanvas({
       name: actorDisplayName,
       color: pingColorFor(room.userId),
       at: Date.now(),
+      normalRangeFt: null,
+      longRangeFt: null,
+      attackModifier: 0,
     };
     setLocalTargetLock(lock);
     setTargetMode(false);
@@ -2837,6 +2919,14 @@ export function SceneCanvas({
                   authorName={lock.name}
                   cover={hint}
                   feet={feetBetween(source.x, source.y, target.x, target.y)}
+                  rangeLabel={
+                    lock.normalRangeFt
+                      ? attackRangeStatus(
+                          feetBetween(source.x, source.y, target.x, target.y),
+                          lock,
+                        ).label
+                      : undefined
+                  }
                   viewScale={view.scale}
                   gridSize={scene.grid_size}
                 />
@@ -3583,7 +3673,7 @@ export function SceneCanvas({
               {laserMode && (
                 <button type="button" onClick={exitLaser} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-red-300">Done laser</button>
               )}
-              {(targetMode || localTargetLock) && (
+              {targetMode && (
                 <>
                   <span className="flex min-h-11 items-center px-2 text-xs text-neutral-400">
                     {targetMode
@@ -3601,6 +3691,120 @@ export function SceneCanvas({
           )}
         </div>
       )}
+
+      {localTargetLock && (() => {
+        const source = room.tokens.find((t) => t.id === localTargetLock.sourceId);
+        const target = room.tokens.find((t) => t.id === localTargetLock.targetId);
+        if (!source || !target) return null;
+        const distance = feetBetween(source.x, source.y, target.x, target.y);
+        const cover = coverHintBetween(
+          source,
+          target,
+          room.tokens,
+          room.walls,
+          room.fogDoors,
+          scene.grid_size,
+        );
+        const range = attackRangeStatus(distance, localTargetLock);
+        return (
+          <div className="absolute inset-x-2 bottom-16 z-[32] rounded-xl border border-neutral-700 bg-neutral-950/95 p-3 shadow-2xl backdrop-blur sm:inset-x-auto sm:bottom-16 sm:right-16 sm:w-80">
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-neutral-100">
+                  🎯 {source.label} → {target.label}
+                </div>
+                <div className="mt-0.5 text-[11px] text-neutral-500">
+                  {distance} ft · {cover.label}
+                  {cover.level === "half" ? " · Target AC +2" : ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={clearTargetLock}
+                aria-label="Clear target"
+                className="grid min-h-9 min-w-9 place-items-center rounded-lg text-neutral-500 hover:bg-neutral-800 hover:text-red-300"
+              >
+                ✕
+              </button>
+            </div>
+
+            {cover.level === "full" && (
+              <div className="mb-2 rounded-lg border border-red-900/70 bg-red-950/40 px-2 py-1.5 text-[11px] text-red-300">
+                Full Cover hint: no clear attack line. DM can still adjudicate manually.
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-2">
+              <label className="text-[10px] text-neutral-500">
+                Normal ft
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={attackNormalRange}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setAttackNormalRange(value);
+                    updateAttackAssist({ normalRangeFt: numericOrNull(value) });
+                  }}
+                  placeholder="60"
+                  className="mt-1 min-h-10 w-full rounded-lg border border-neutral-700 bg-neutral-900 px-2 text-base text-neutral-100"
+                />
+              </label>
+              <label className="text-[10px] text-neutral-500">
+                Long ft
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  value={attackLongRange}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setAttackLongRange(value);
+                    updateAttackAssist({ longRangeFt: numericOrNull(value) });
+                  }}
+                  placeholder="120"
+                  className="mt-1 min-h-10 w-full rounded-lg border border-neutral-700 bg-neutral-900 px-2 text-base text-neutral-100"
+                />
+              </label>
+              <label className="text-[10px] text-neutral-500">
+                Attack mod
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={attackModifier}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setAttackModifier(value);
+                    const parsed = Number(value);
+                    updateAttackAssist({
+                      attackModifier: Number.isFinite(parsed) ? parsed : 0,
+                    });
+                  }}
+                  className="mt-1 min-h-10 w-full rounded-lg border border-neutral-700 bg-neutral-900 px-2 text-base text-neutral-100"
+                />
+              </label>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2">
+              <span
+                className="flex min-h-10 flex-1 items-center rounded-lg border border-neutral-800 bg-neutral-900 px-3 text-xs font-semibold"
+                style={{ color: range.tone }}
+              >
+                {range.label}
+                {range.label === "Long Range" ? " · disadvantage" : ""}
+              </span>
+              <button
+                type="button"
+                onClick={openAttackRoll}
+                className="min-h-10 rounded-lg bg-amber-500 px-4 text-xs font-bold text-neutral-950"
+              >
+                🎲 Attack
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {isDM && selectedToken && (
         <TokenInspector
@@ -3639,6 +3843,7 @@ function TargetLine({
   authorName,
   cover,
   feet,
+  rangeLabel,
   viewScale,
   gridSize,
 }: {
@@ -3649,6 +3854,7 @@ function TargetLine({
   authorName: string;
   cover: CoverHint;
   feet: number;
+  rangeLabel?: string;
   viewScale: number;
   gridSize: number;
 }) {
@@ -3670,7 +3876,8 @@ function TargetLine({
     cover.blockers.length > 0
       ? ` · ${cover.blockers.slice(0, 2).join(", ")} blocking`
       : "";
-  const label = `${cover.label} · ${feet} ft${blockerText}`;
+  const rangeText = rangeLabel ? ` · ${rangeLabel}` : "";
+  const label = `${cover.label} · ${feet} ft${rangeText}${blockerText}`;
   const width = Math.min(250, Math.max(120, label.length * 6.4));
 
   return (
