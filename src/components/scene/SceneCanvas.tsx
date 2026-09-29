@@ -45,6 +45,8 @@ const TOKEN_DRAG_SETTLE_MS = 150;
 const DRAW_COLORS = ["#f59e0b", "#ef4444", "#22c55e", "#38bdf8", "#e879f9", "#f5f5f5"];
 // Pen thickness in screen px — converted to map px at the drawer's zoom when the stroke starts.
 const DRAW_WIDTH_PX = 3;
+// Live pen strokes are broadcast while drawing; the completed stroke is still persisted once.
+const DRAW_LIVE_STALE_MS = 3000;
 // How long a right-click ping stays on screen.
 const PING_MS = 2500;
 // Pings are colored per person — a fixed palette (not colorFromString's hsl(), which Konva
@@ -349,6 +351,13 @@ export function SceneCanvas({
   const [stroke, setStroke] = useState<{ points: number[]; width: number } | null>(null);
   const strokeDrawing = useRef(false);
 
+  // In-progress freehand strokes from other connected users. These are broadcast-only:
+  // once the drawer releases, the persisted scene_drawings row replaces this preview.
+  const [remoteStrokes, setRemoteStrokes] = useState<
+    Map<string, { points: number[]; color: string; width: number; at: number }>
+  >(new Map());
+  const drawLiveChannelRef = useRef<RealtimeChannel | null>(null);
+
   // Right-click pings (Foundry-style) — broadcast-only like AOE, never stored.
   const [pings, setPings] = useState<Ping[]>([]);
   const pingChannelRef = useRef<RealtimeChannel | null>(null);
@@ -565,6 +574,88 @@ export function SceneCanvas({
       room.supabase.removeChannel(channel);
     };
   }, [castMode, room.supabase, scene.room_id, scene.id]);
+
+  // --- Live freehand drawing -------------------------------------------------
+  // Persisted drawings still use scene_drawings; this channel only makes the stroke visible
+  // to everyone else while the pointer is still moving.
+  useEffect(() => {
+    const channel = room.supabase.channel(`draw-live:${scene.room_id}`, {
+      config: { broadcast: { self: false } },
+    });
+    drawLiveChannelRef.current = channel;
+
+    channel.on("broadcast", { event: "stroke" }, ({ payload }) => {
+      const p = payload as {
+        userId: string;
+        sceneId: string;
+        points: number[];
+        color: string;
+        width: number;
+      };
+      if (p.sceneId !== scene.id) return;
+      setRemoteStrokes((m) => {
+        const next = new Map(m);
+        next.set(p.userId, {
+          points: p.points,
+          color: p.color,
+          width: p.width,
+          at: Date.now(),
+        });
+        return next;
+      });
+    });
+
+    channel.on("broadcast", { event: "clear" }, ({ payload }) => {
+      const p = payload as { userId: string; sceneId: string };
+      if (p.sceneId !== scene.id) return;
+      setRemoteStrokes((m) => {
+        if (!m.has(p.userId)) return m;
+        const next = new Map(m);
+        next.delete(p.userId);
+        return next;
+      });
+    });
+
+    channel.subscribe();
+
+    // If a browser disappears halfway through a stroke there is no clear event.
+    const sweep = setInterval(() => {
+      const cutoff = Date.now() - DRAW_LIVE_STALE_MS;
+      setRemoteStrokes((m) => {
+        if (![...m.values()].some((s) => s.at < cutoff)) return m;
+        return new Map([...m].filter(([, s]) => s.at >= cutoff));
+      });
+    }, 1000);
+
+    return () => {
+      clearInterval(sweep);
+      drawLiveChannelRef.current = null;
+      setRemoteStrokes(new Map());
+      room.supabase.removeChannel(channel);
+    };
+  }, [room.supabase, scene.room_id, scene.id]);
+
+  function broadcastLiveStroke(points: number[], width: number) {
+    drawLiveChannelRef.current?.send({
+      type: "broadcast",
+      event: "stroke",
+      payload: {
+        userId: room.userId,
+        sceneId: scene.id,
+        points,
+        color: drawColor,
+        width,
+      },
+    });
+  }
+
+  function clearLiveStroke() {
+    drawLiveChannelRef.current?.send({
+      type: "broadcast",
+      event: "clear",
+      payload: { userId: room.userId, sceneId: scene.id },
+    });
+  }
 
   // --- Pings ----------------------------------------------------------------
   // Right-click anywhere on the map pings that spot for everyone in the room. Cast screens
@@ -861,6 +952,7 @@ export function SceneCanvas({
   }
 
   function exitDraw() {
+    if (strokeDrawing.current) clearLiveStroke();
     setDrawMode(null);
     setStroke(null);
     strokeDrawing.current = false;
@@ -870,6 +962,7 @@ export function SceneCanvas({
     strokeDrawing.current = false;
     const done = stroke;
     setStroke(null);
+    clearLiveStroke();
     // A plain click leaves a single point — draw it as a dot rather than dropping it.
     if (!done || done.points.length < 2) return;
     const points =
@@ -977,6 +1070,7 @@ export function SceneCanvas({
     if ("button" in e.evt && e.evt.button !== 0) return;
     if ("touches" in e.evt && e.evt.touches.length > 1) {
       lastPinch.current = null;
+      if (strokeDrawing.current) clearLiveStroke();
       strokeDrawing.current = false;
       setStroke(null);
       return;
@@ -986,7 +1080,9 @@ export function SceneCanvas({
       const p = worldPointer(e);
       if (!p) return;
       strokeDrawing.current = true;
-      setStroke({ points: [p.x, p.y], width: DRAW_WIDTH_PX / view.scale });
+      const nextStroke = { points: [p.x, p.y], width: DRAW_WIDTH_PX / view.scale };
+      setStroke(nextStroke);
+      broadcastLiveStroke(nextStroke.points, nextStroke.width);
       return;
     }
     if (drawMode === "eraser") return;
@@ -1060,7 +1156,9 @@ export function SceneCanvas({
         const n = s.points.length;
         // Skip points closer than ~2 screen px to the last one — keeps rows small.
         if (Math.hypot(p.x - s.points[n - 2], p.y - s.points[n - 1]) < 2 / view.scale) return s;
-        return { ...s, points: [...s.points, p.x, p.y] };
+        const next = { ...s, points: [...s.points, p.x, p.y] };
+        broadcastLiveStroke(next.points, next.width);
+        return next;
       });
       return;
     }
@@ -1915,6 +2013,18 @@ export function SceneCanvas({
                 // Drag-erase: sweeping over strokes with the button held erases each one.
                 if (e.evt.buttons === 1) void deleteDrawings([d.id]);
               }}
+            />
+          ))}
+          {[...remoteStrokes.entries()].map(([userId, live]) => (
+            <Line
+              key={`live-${userId}`}
+              points={live.points}
+              stroke={live.color}
+              strokeWidth={live.width}
+              lineCap="round"
+              lineJoin="round"
+              tension={0.3}
+              listening={false}
             />
           ))}
           {stroke && (
