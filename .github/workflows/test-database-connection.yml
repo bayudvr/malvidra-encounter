@@ -1,0 +1,40 @@
+name: Test Database Connection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: npm install pg
+      - name: Test DATABASE_URL
+        run: |
+          node --input-type=module <<'EOF'
+          import pg from "pg";
+
+          const url = process.env.DATABASE_URL;
+          if (!url) {
+            console.error("DATABASE_URL secret is not set.");
+            process.exit(1);
+          }
+
+          const client = new pg.Client({
+            connectionString: url,
+            ssl: { rejectUnauthorized: false },
+          });
+
+          try {
+            await client.connect();
+            await client.query("select 1");
+            console.log("Database connection successful");
+          } finally {
+            await client.end();
+          }
+          EOF
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
