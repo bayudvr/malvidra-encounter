@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 
 const BTN =
-  "hidden rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:inline";
+  "rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800";
 
 /**
  * DM-only casting controls in the room header.
