@@ -241,6 +241,27 @@ export function DiceTray({ room }: { room: RoomStore }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.room?.id, room.supabase, room.userId]);
 
+  // Other combat UI (for example Target / Attack Assist) can prefill the tray
+  // without coupling SceneCanvas directly to DiceTray state.
+  useEffect(() => {
+    function onPrefill(event: Event) {
+      const detail = (event as CustomEvent<{
+        sides?: number;
+        count?: number;
+        modifier?: number;
+        advMode?: AdvMode;
+      }>).detail;
+      const sides = detail?.sides ?? 20;
+      const count = Math.max(1, detail?.count ?? 1);
+      setPool({ [sides]: count });
+      setModifier(detail?.modifier ?? 0);
+      setAdvMode(detail?.advMode ?? "normal");
+      setOpen(true);
+    }
+    window.addEventListener("mv:dice-prefill", onPrefill);
+    return () => window.removeEventListener("mv:dice-prefill", onPrefill);
+  }, []);
+
   // Advantage/disadvantage always rolls the d20 as a pair, regardless of the
   // manually-clicked d20 count in the pool.
   const notation = buildNotation(pool, modifier, advMode);
