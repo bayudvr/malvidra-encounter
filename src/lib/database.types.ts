@@ -545,6 +545,10 @@ export interface Database {
         Args: { p_combatant: string; p_condition: string };
         Returns: Database["public"]["Tables"]["combatants"]["Row"];
       };
+      end_own_turn: {
+        Args: { p_scene: string };
+        Returns: Database["public"]["Tables"]["scenes"]["Row"];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
