@@ -2441,6 +2441,11 @@ export function SceneCanvas({
                   }
                   owned={owned}
                   selected={selectedIds.includes(t.id)}
+                  activeTurn={
+                    scene.mode === "combat" &&
+                    !!combatant &&
+                    combatant.id === scene.active_combatant_id
+                  }
                   combatant={combatant}
                   revealStats={isDM || !!combatant?.is_player}
                   speechText={speechByToken.get(t.id) ?? null}
