@@ -51,6 +51,8 @@ const DRAW_LIVE_SEND_MS = 50;
 const DRAW_LIVE_STALE_MS = 3000;
 // How long a right-click ping stays on screen.
 const PING_MS = 2500;
+const LASER_SEND_MS = 50;
+const LASER_STALE_MS = 2000;
 // Pings are colored per person — a fixed palette (not colorFromString's hsl(), which Konva
 // doesn't parse in its space-separated form) picked by a hash of the user id.
 const PING_COLORS = ["#f59e0b", "#38bdf8", "#22c55e", "#e879f9", "#ef4444", "#facc15", "#2dd4bf"];
@@ -62,6 +64,13 @@ function pingColorFor(userId: string) {
 }
 
 type Ping = { id: string; x: number; y: number; color: string; name: string };
+type LaserPointer = {
+  x: number;
+  y: number;
+  color: string;
+  name: string;
+  at: number;
+};
 
 // Splits a trailing " <number>" off a label, e.g. "Goblin 2" -> ("Goblin", 2).
 // A label with no trailing number is its own base with an implicit 0.
@@ -362,9 +371,16 @@ export function SceneCanvas({
   const drawLiveChannelRef = useRef<RealtimeChannel | null>(null);
   const drawLiveLastSent = useRef(0);
 
-  // Right-click pings (Foundry-style) — broadcast-only like AOE, never stored.
+  // Right-click pings + shared laser pointer use one ephemeral room channel.
   const [pings, setPings] = useState<Ping[]>([]);
   const pingChannelRef = useRef<RealtimeChannel | null>(null);
+  const [remoteLasers, setRemoteLasers] = useState<Map<string, LaserPointer>>(new Map());
+  const [localLaser, setLocalLaser] = useState<Pt | null>(null);
+  const [laserMode, setLaserMode] = useState(false);
+  const [laserKeyHeld, setLaserKeyHeld] = useState(false);
+  const laserDrawing = useRef(false);
+  const laserLastSent = useRef(0);
+  const laserActive = laserMode || laserKeyHeld;
 
   const [mapImage] = useImage(scene.map_url);
 
@@ -383,6 +399,11 @@ export function SceneCanvas({
     setStroke(null);
     strokeDrawing.current = false;
     setPings([]);
+    setRemoteLasers(new Map());
+    setLocalLaser(null);
+    setLaserMode(false);
+    setLaserKeyHeld(false);
+    laserDrawing.current = false;
     fogUndo.current = [];
   }, [scene.id]);
 
@@ -447,6 +468,48 @@ export function SceneCanvas({
       window.removeEventListener("blur", onBlur);
     };
   }, [isDM]);
+
+  // Desktop shortcut: hold L to use the shared laser without switching tools.
+  useEffect(() => {
+    if (castMode) return;
+    function editableTarget(target: EventTarget | null) {
+      const el = target as HTMLElement | null;
+      return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+    }
+    function onDown(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== "l" || editableTarget(e.target) || e.repeat) return;
+      setLaserKeyHeld(true);
+    }
+    function onUp(e: KeyboardEvent) {
+      if (e.key.toLowerCase() !== "l") return;
+      setLaserKeyHeld(false);
+      laserDrawing.current = false;
+      setLocalLaser(null);
+      pingChannelRef.current?.send({
+        type: "broadcast",
+        event: "laser-clear",
+        payload: { userId: room.userId, sceneId: scene.id },
+      });
+    }
+    function onBlur() {
+      setLaserKeyHeld(false);
+      laserDrawing.current = false;
+      setLocalLaser(null);
+      pingChannelRef.current?.send({
+        type: "broadcast",
+        event: "laser-clear",
+        payload: { userId: room.userId, sceneId: scene.id },
+      });
+    }
+    window.addEventListener("keydown", onDown);
+    window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onDown);
+      window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [castMode, room.userId, scene.id]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -682,9 +745,52 @@ export function SceneCanvas({
       if (p.sceneId !== scene.id) return;
       addPing({ id: p.id, x: p.x, y: p.y, color: p.color, name: p.name });
     });
+    channel.on("broadcast", { event: "laser" }, ({ payload }) => {
+      const p = payload as {
+        userId: string;
+        sceneId: string;
+        x: number;
+        y: number;
+        color: string;
+        name: string;
+      };
+      if (p.sceneId !== scene.id) return;
+      setRemoteLasers((m) => {
+        const next = new Map(m);
+        next.set(p.userId, {
+          x: p.x,
+          y: p.y,
+          color: p.color,
+          name: p.name,
+          at: Date.now(),
+        });
+        return next;
+      });
+    });
+    channel.on("broadcast", { event: "laser-clear" }, ({ payload }) => {
+      const p = payload as { userId: string; sceneId: string };
+      if (p.sceneId !== scene.id) return;
+      setRemoteLasers((m) => {
+        if (!m.has(p.userId)) return m;
+        const next = new Map(m);
+        next.delete(p.userId);
+        return next;
+      });
+    });
     channel.subscribe();
+
+    const sweep = setInterval(() => {
+      const cutoff = Date.now() - LASER_STALE_MS;
+      setRemoteLasers((m) => {
+        if (![...m.values()].some((laser) => laser.at < cutoff)) return m;
+        return new Map([...m].filter(([, laser]) => laser.at >= cutoff));
+      });
+    }, 750);
+
     return () => {
+      clearInterval(sweep);
       pingChannelRef.current = null;
+      setRemoteLasers(new Map());
       room.supabase.removeChannel(channel);
     };
   }, [room.supabase, scene.room_id, scene.id, addPing]);
@@ -863,6 +969,40 @@ export function SceneCanvas({
       event: "ping",
       payload: { ...ping, sceneId: scene.id },
     });
+  }
+
+  function sendLaserAt(p: Pt, force = false) {
+    const now = Date.now();
+    if (!force && now - laserLastSent.current < LASER_SEND_MS) return;
+    laserLastSent.current = now;
+    setLocalLaser(p);
+    pingChannelRef.current?.send({
+      type: "broadcast",
+      event: "laser",
+      payload: {
+        userId: room.userId,
+        sceneId: scene.id,
+        x: p.x,
+        y: p.y,
+        color: pingColorFor(room.userId),
+        name: actorDisplayName,
+      },
+    });
+  }
+
+  function clearLaser() {
+    laserDrawing.current = false;
+    setLocalLaser(null);
+    pingChannelRef.current?.send({
+      type: "broadcast",
+      event: "laser-clear",
+      payload: { userId: room.userId, sceneId: scene.id },
+    });
+  }
+
+  function exitLaser() {
+    setLaserMode(false);
+    clearLaser();
   }
 
   function broadcastAoeClear() {
@@ -1087,6 +1227,15 @@ export function SceneCanvas({
       setStroke(null);
       return;
     }
+    if (laserActive) {
+      e.evt.preventDefault();
+      const p = worldPointer(e);
+      if (!p) return;
+      laserDrawing.current = true;
+      laserLastSent.current = 0;
+      sendLaserAt(p, true);
+      return;
+    }
     if (drawMode === "pen") {
       e.evt.preventDefault();
       const p = worldPointer(e);
@@ -1156,6 +1305,11 @@ export function SceneCanvas({
       pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
       return;
     }
+    if (laserActive && (laserKeyHeld || laserDrawing.current)) {
+      const p = worldPointer(e);
+      if (p) sendLaserAt(p);
+      return;
+    }
     if (marqueeDrawing.current) {
       const p = worldPointer(e);
       if (p) setMarquee((m) => (m ? { ...m, x1: p.x, y1: p.y } : m));
@@ -1208,6 +1362,11 @@ export function SceneCanvas({
 
   function stagePointerUp() {
     if (castMode) return;
+    if (laserDrawing.current) {
+      if (laserMode) clearLaser();
+      else laserDrawing.current = false;
+      return;
+    }
     if (strokeDrawing.current) {
       void finishStroke();
       return;
@@ -1818,6 +1977,7 @@ export function SceneCanvas({
         draggable={
           !castMode &&
           !measuring &&
+          !laserActive &&
           !drawingPolygon &&
           !addingDoor &&
           !drawingWall &&
@@ -1850,8 +2010,10 @@ export function SceneCanvas({
         onTouchEnd={stagePointerUp}
         onContextMenu={sendPing}
         style={
-          measuring || drawingPolygon || addingDoor || drawingWall || aoeMode || drawMode
-            ? { cursor: "crosshair" }
+          laserActive
+            ? { cursor: "none" }
+            : measuring || drawingPolygon || addingDoor || drawingWall || aoeMode || drawMode
+              ? { cursor: "crosshair" }
             : undefined
         }
       >
@@ -2377,6 +2539,29 @@ export function SceneCanvas({
             ))}
           </Layer>
         )}
+
+        {(remoteLasers.size > 0 || localLaser) && (
+          <Layer listening={false}>
+            {[...remoteLasers.entries()].map(([userId, laser]) => (
+              <LaserMarker
+                key={userId}
+                laser={laser}
+                viewScale={view.scale}
+              />
+            ))}
+            {localLaser && (
+              <LaserMarker
+                laser={{
+                  ...localLaser,
+                  color: pingColorFor(room.userId),
+                  name: actorDisplayName,
+                  at: Date.now(),
+                }}
+                viewScale={view.scale}
+              />
+            )}
+          </Layer>
+        )}
       </Stage>
 
       {!castMode && (
@@ -2390,6 +2575,7 @@ export function SceneCanvas({
               setMobileToolMore(false);
               if (!measureMenu) {
                 exitDraw();
+                exitLaser();
                 setSelectMode(false);
               }
             }}
@@ -2463,6 +2649,7 @@ export function SceneCanvas({
                 cancelWall();
                 exitAoe();
                 exitDraw();
+                exitLaser();
                 setSelectMode(false);
               }}
               className={`min-h-11 min-w-11 rounded-md border px-2 py-1 text-xs font-medium shadow sm:min-h-0 sm:min-w-0 ${
@@ -2562,6 +2749,7 @@ export function SceneCanvas({
               setAddingDoor(false);
               cancelWall();
               exitDraw();
+              exitLaser();
               setSelectMode(false);
             }}
             className={`min-h-11 min-w-11 rounded-md border px-2 py-1 text-xs font-medium shadow sm:min-h-0 sm:min-w-0 ${
@@ -2739,6 +2927,7 @@ export function SceneCanvas({
                 setAddingDoor(false);
                 exitAoe();
                 exitDraw();
+                exitLaser();
                 setSelectMode(false);
                 setDrawingWall(true);
                 setWallPoints([]);
@@ -2794,6 +2983,7 @@ export function SceneCanvas({
             setFogMenu(false);
             if (next) {
               exitDraw();
+              exitLaser();
               setSelectMode(false);
             }
           }}
@@ -2971,6 +3161,26 @@ export function SceneCanvas({
                     📐 {shape}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    exitMeasure();
+                    cancelPolygon();
+                    setAddingDoor(false);
+                    cancelWall();
+                    exitAoe();
+                    exitDraw();
+                    setSelectMode(false);
+                    setLaserMode(true);
+                    setMobileToolMore(false);
+                    toast.info("Laser on — drag anywhere on the map");
+                  }}
+                  className={`min-h-11 rounded-lg px-2 text-xs ${
+                    laserMode ? "bg-amber-400/20 text-amber-200" : "bg-neutral-900 text-neutral-300"
+                  }`}
+                >
+                  🔴 Laser
+                </button>
                 {isDM && (
                   <button
                     type="button"
@@ -2997,7 +3207,7 @@ export function SceneCanvas({
             </div>
           )}
 
-          {(drawingPolygon || addingDoor || drawingWall || aoeMode || measuring) && !measureMenu && !fogMenu && !drawMode && !mobileToolMore && (
+          {(drawingPolygon || addingDoor || drawingWall || aoeMode || measuring || laserMode) && !measureMenu && !fogMenu && !drawMode && !mobileToolMore && (
             <div className="pointer-events-auto flex flex-wrap gap-2 rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
               {drawingPolygon && polygonPoints.length > 0 && (
                 <button type="button" onClick={undoPolygonPoint} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Undo point</button>
@@ -3025,6 +3235,9 @@ export function SceneCanvas({
               )}
               {measuring && (
                 <button type="button" onClick={exitMeasure} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Done measure</button>
+              )}
+              {laserMode && (
+                <button type="button" onClick={exitLaser} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-red-300">Done laser</button>
               )}
             </div>
           )}
