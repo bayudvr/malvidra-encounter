@@ -119,7 +119,25 @@ export function RoomView({
           </button>
         </div>
 
-        <div className="hidden shrink-0 items-center gap-2 sm:flex">
+        {mobileActionsOpen && (
+          <button
+            type="button"
+            aria-label="Close DM actions"
+            onClick={() => setMobileActionsOpen(false)}
+            className="absolute inset-x-0 top-full z-40 h-[100dvh] bg-black/40 sm:hidden"
+          />
+        )}
+
+        <div
+          className={`z-50 items-center gap-2 sm:static sm:flex sm:shrink-0 sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none ${
+            mobileActionsOpen
+              ? "absolute right-2 top-[calc(100%+0.35rem)] flex w-64 flex-wrap rounded-xl border border-neutral-700 bg-neutral-950 p-2 shadow-2xl"
+              : "hidden"
+          } sm:flex`}
+        >
+          <div className="w-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500 sm:hidden">
+            {isDM ? "DM controls" : "Room controls"}
+          </div>
           {isDM && scene && <ModeToggle room={room} scene={scene} />}
           {isDM && <NotesPanel room={room} isDM={isDM} />}
           {isDM && <ReferencePanel room={room} isDM={isDM} />}
@@ -132,53 +150,16 @@ export function RoomView({
           {inCombat && isDM && (
             <button
               type="button"
-              onClick={() =>
-                setDrawer((d) => (d === "initiative" ? null : "initiative"))
-              }
-              className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800 lg:hidden"
+              onClick={() => {
+                setDrawer((d) => (d === "initiative" ? null : "initiative"));
+                setMobileActionsOpen(false);
+              }}
+              className="min-h-10 rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800 sm:min-h-0 lg:hidden"
             >
               Combatants
             </button>
           )}
         </div>
-
-        {mobileActionsOpen && (
-          <>
-            <button
-              type="button"
-              aria-label="Close DM actions"
-              onClick={() => setMobileActionsOpen(false)}
-              className="absolute inset-x-0 top-full z-40 h-[100dvh] bg-black/40 sm:hidden"
-            />
-            <div className="absolute right-2 top-[calc(100%+0.35rem)] z-50 w-64 rounded-xl border border-neutral-700 bg-neutral-950 p-2 shadow-2xl sm:hidden">
-              <div className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                {isDM ? "DM controls" : "Room controls"}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {isDM && scene && <ModeToggle room={room} scene={scene} />}
-                {isDM && <NotesPanel room={room} isDM={isDM} />}
-                {isDM && <ReferencePanel room={room} isDM={isDM} />}
-                {isDM && <EncounterBuilderPanel room={room} isDM={isDM} />}
-                {isDM && (
-                  <CastControls roomId={roomId} castToken={room.room?.cast_token} />
-                )}
-                <PlayerRequests room={room} isDM={isDM} />
-                {inCombat && isDM && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDrawer("initiative");
-                      setMobileActionsOpen(false);
-                    }}
-                    className="min-h-10 rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-200"
-                  >
-                    ⚔ Combatants
-                  </button>
-                )}
-              </div>
-            </div>
-          </>
-        )}
       </header>
 
       {scene && (scene.spotlight_user_id || scene.spotlight_note) && (
