@@ -537,6 +537,14 @@ export interface Database {
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
       send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
       rotate_cast_token: { Args: { p_room: string }; Returns: string };
+      adjust_own_combatant_hp: {
+        Args: { p_combatant: string; p_delta: number };
+        Returns: Database["public"]["Tables"]["combatants"]["Row"];
+      };
+      toggle_own_combatant_condition: {
+        Args: { p_combatant: string; p_condition: string };
+        Returns: Database["public"]["Tables"]["combatants"]["Row"];
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
