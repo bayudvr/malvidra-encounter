@@ -53,6 +53,7 @@ const DRAW_LIVE_STALE_MS = 3000;
 const PING_MS = 2500;
 const LASER_SEND_MS = 50;
 const LASER_STALE_MS = 2000;
+const TARGET_STALE_MS = 120000;
 // Pings are colored per person — a fixed palette (not colorFromString's hsl(), which Konva
 // doesn't parse in its space-separated form) picked by a hash of the user id.
 const PING_COLORS = ["#f59e0b", "#38bdf8", "#22c55e", "#e879f9", "#ef4444", "#facc15", "#2dd4bf"];
@@ -70,6 +71,20 @@ type LaserPointer = {
   color: string;
   name: string;
   at: number;
+};
+
+type TargetLock = {
+  sourceId: string;
+  targetId: string;
+  name: string;
+  color: string;
+  at: number;
+};
+
+type CoverHint = {
+  level: "none" | "half" | "full";
+  label: string;
+  blockers: string[];
 };
 
 // Splits a trailing " <number>" off a label, e.g. "Goblin 2" -> ("Goblin", 2).
@@ -117,6 +132,111 @@ function segmentsIntersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt) {
     ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
     ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
   );
+}
+
+function segmentPassesThroughCircle(a: Pt, b: Pt, center: Pt, radius: number) {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const len2 = abx * abx + aby * aby;
+  if (len2 <= 0.0001) return false;
+  const t = ((center.x - a.x) * abx + (center.y - a.y) * aby) / len2;
+  // Ignore circles effectively sitting on the attacker/target endpoint.
+  if (t <= 0.04 || t >= 0.96) return false;
+  const x = a.x + abx * t;
+  const y = a.y + aby * t;
+  return Math.hypot(center.x - x, center.y - y) < radius;
+}
+
+function coverHintBetween(
+  source: Token,
+  target: Token,
+  tokens: Token[],
+  walls: { points: [number, number][] }[],
+  doors: FogDoor[],
+  gridSize: number,
+): CoverHint {
+  const targetRadius = (target.size * gridSize) / 2;
+  const sampleOffset = targetRadius * 0.58;
+  const samples: Pt[] = [
+    { x: target.x, y: target.y },
+    { x: target.x - sampleOffset, y: target.y },
+    { x: target.x + sampleOffset, y: target.y },
+    { x: target.x, y: target.y - sampleOffset },
+    { x: target.x, y: target.y + sampleOffset },
+  ];
+  const sourcePoint = { x: source.x, y: source.y };
+  const creatureBlockers = new Set<string>();
+  let hardBlockedRays = 0;
+  let anyBlockedRay = false;
+
+  function hardObstacleBlocks(end: Pt) {
+    for (const wall of walls) {
+      const pts = wall.points;
+      for (let i = 0; i < pts.length; i++) {
+        const a = { x: pts[i][0], y: pts[i][1] };
+        const b = { x: pts[(i + 1) % pts.length][0], y: pts[(i + 1) % pts.length][1] };
+        if (segmentsIntersect(sourcePoint, end, a, b)) return true;
+      }
+    }
+    return doors.some(
+      (door) =>
+        !door.is_open &&
+        segmentsIntersect(
+          sourcePoint,
+          end,
+          { x: door.x1, y: door.y1 },
+          { x: door.x2, y: door.y2 },
+        ),
+    );
+  }
+
+  for (const sample of samples) {
+    const hardBlocked = hardObstacleBlocks(sample);
+    if (hardBlocked) {
+      hardBlockedRays += 1;
+      anyBlockedRay = true;
+      continue;
+    }
+
+    for (const blocker of tokens) {
+      if (
+        blocker.id === source.id ||
+        blocker.id === target.id ||
+        blocker.is_hidden
+      ) {
+        continue;
+      }
+      // Tokens are circular on the canvas. Slightly shrink the visual radius so a
+      // line merely grazing the ring doesn't claim cover.
+      const blockerRadius = (blocker.size * gridSize) / 2 * 0.82;
+      if (
+        segmentPassesThroughCircle(
+          sourcePoint,
+          sample,
+          { x: blocker.x, y: blocker.y },
+          blockerRadius,
+        )
+      ) {
+        creatureBlockers.add(blocker.label);
+        anyBlockedRay = true;
+        break;
+      }
+    }
+  }
+
+  // Creatures grant a cover hint but never total cover here. Total cover is reserved
+  // for every sampled ray being cut by a hard wall / closed door.
+  if (hardBlockedRays === samples.length) {
+    return { level: "full", label: "Full Cover", blockers: [] };
+  }
+  if (anyBlockedRay) {
+    return {
+      level: "half",
+      label: "Half Cover",
+      blockers: [...creatureBlockers],
+    };
+  }
+  return { level: "none", label: "No Cover", blockers: [] };
 }
 
 // Distance along a ray from `origin` in direction `dir` (unit vector, but
@@ -382,6 +502,12 @@ export function SceneCanvas({
   const laserLastSent = useRef(0);
   const laserActive = laserMode || laserKeyHeld;
 
+  // Shared targeting is ephemeral. Target mode is a two-tap flow: choose attacker, then target.
+  const [targetMode, setTargetMode] = useState(false);
+  const [targetSourceId, setTargetSourceId] = useState<string | null>(null);
+  const [localTargetLock, setLocalTargetLock] = useState<TargetLock | null>(null);
+  const [remoteTargetLocks, setRemoteTargetLocks] = useState<Map<string, TargetLock>>(new Map());
+
   const [mapImage] = useImage(scene.map_url);
 
   // Reset selection and any in-progress map tool when scene changes
@@ -404,6 +530,10 @@ export function SceneCanvas({
     setLaserMode(false);
     setLaserKeyHeld(false);
     laserDrawing.current = false;
+    setTargetMode(false);
+    setTargetSourceId(null);
+    setLocalTargetLock(null);
+    setRemoteTargetLocks(new Map());
     fogUndo.current = [];
   }, [scene.id]);
 
@@ -777,13 +907,37 @@ export function SceneCanvas({
         return next;
       });
     });
+    channel.on("broadcast", { event: "target-set" }, ({ payload }) => {
+      const p = payload as TargetLock & { userId: string; sceneId: string };
+      if (p.sceneId !== scene.id) return;
+      setRemoteTargetLocks((m) => {
+        const next = new Map(m);
+        next.set(p.userId, { ...p, at: Date.now() });
+        return next;
+      });
+    });
+    channel.on("broadcast", { event: "target-clear" }, ({ payload }) => {
+      const p = payload as { userId: string; sceneId: string };
+      if (p.sceneId !== scene.id) return;
+      setRemoteTargetLocks((m) => {
+        if (!m.has(p.userId)) return m;
+        const next = new Map(m);
+        next.delete(p.userId);
+        return next;
+      });
+    });
     channel.subscribe();
 
     const sweep = setInterval(() => {
-      const cutoff = Date.now() - LASER_STALE_MS;
+      const laserCutoff = Date.now() - LASER_STALE_MS;
       setRemoteLasers((m) => {
-        if (![...m.values()].some((laser) => laser.at < cutoff)) return m;
-        return new Map([...m].filter(([, laser]) => laser.at >= cutoff));
+        if (![...m.values()].some((laser) => laser.at < laserCutoff)) return m;
+        return new Map([...m].filter(([, laser]) => laser.at >= laserCutoff));
+      });
+      const targetCutoff = Date.now() - TARGET_STALE_MS;
+      setRemoteTargetLocks((m) => {
+        if (![...m.values()].some((lock) => lock.at < targetCutoff)) return m;
+        return new Map([...m].filter(([, lock]) => lock.at >= targetCutoff));
       });
     }, 750);
 
@@ -791,6 +945,7 @@ export function SceneCanvas({
       clearInterval(sweep);
       pingChannelRef.current = null;
       setRemoteLasers(new Map());
+      setRemoteTargetLocks(new Map());
       room.supabase.removeChannel(channel);
     };
   }, [room.supabase, scene.room_id, scene.id, addPing]);
@@ -1003,6 +1158,88 @@ export function SceneCanvas({
   function exitLaser() {
     setLaserMode(false);
     clearLaser();
+  }
+
+  function clearTargetLock() {
+    setLocalTargetLock(null);
+    setTargetMode(false);
+    setTargetSourceId(null);
+    pingChannelRef.current?.send({
+      type: "broadcast",
+      event: "target-clear",
+      payload: { userId: room.userId, sceneId: scene.id },
+    });
+  }
+
+  function beginTargetMode() {
+    exitLaser();
+    exitMeasure();
+    exitDraw();
+    cancelPolygon();
+    setAddingDoor(false);
+    cancelWall();
+    exitAoe();
+    setSelectMode(false);
+    setMobileToolMore(false);
+
+    const selected =
+      selectedIds.length === 1
+        ? room.tokens.find((token) => token.id === selectedIds[0]) ?? null
+        : null;
+    const usableSelected =
+      selected && (isDM || selected.owner_user_id === room.userId) ? selected : null;
+
+    setTargetSourceId(usableSelected?.id ?? null);
+    setTargetMode(true);
+    toast.info(
+      usableSelected
+        ? `Targeting from ${usableSelected.label} — tap a target`
+        : "Target mode — tap your attacker, then tap the target",
+    );
+  }
+
+  function handleTargetToken(token: Token) {
+    if (!targetMode) return false;
+
+    if (!targetSourceId) {
+      if (!isDM && token.owner_user_id !== room.userId) {
+        toast.error("Choose a token you own as the attacker");
+        return true;
+      }
+      setTargetSourceId(token.id);
+      toast.info(`${token.label} selected — now tap the target`);
+      return true;
+    }
+
+    if (token.id === targetSourceId) {
+      setTargetSourceId(null);
+      toast.info("Attacker cleared — choose another token");
+      return true;
+    }
+
+    const source = room.tokens.find((candidate) => candidate.id === targetSourceId);
+    if (!source) {
+      setTargetSourceId(null);
+      return true;
+    }
+
+    const lock: TargetLock = {
+      sourceId: source.id,
+      targetId: token.id,
+      name: actorDisplayName,
+      color: pingColorFor(room.userId),
+      at: Date.now(),
+    };
+    setLocalTargetLock(lock);
+    setTargetMode(false);
+    setTargetSourceId(null);
+    setSelectedIds([]);
+    pingChannelRef.current?.send({
+      type: "broadcast",
+      event: "target-set",
+      payload: { ...lock, userId: room.userId, sceneId: scene.id },
+    });
+    return true;
   }
 
   function broadcastAoeClear() {
@@ -2113,6 +2350,7 @@ export function SceneCanvas({
                     !castMode &&
                     (isDM || owned) &&
                     !measuring &&
+                    !targetMode &&
                     !drawingPolygon &&
                     !addingDoor &&
                     !drawingWall &&
@@ -2126,6 +2364,7 @@ export function SceneCanvas({
                   speechText={speechByToken.get(t.id) ?? null}
                   remotePos={remoteDrags.get(t.id) ?? null}
                   onSelect={(e) => {
+                    if (handleTargetToken(t)) return;
                     // Non-DM selection is only meaningful for a player's own token (opens
                     // TokenAuraPanel) — everything else here (multi-select, DM tools) stays
                     // DM-only, same as before.
@@ -2564,6 +2803,47 @@ export function SceneCanvas({
           </Layer>
         )}
 
+        {(localTargetLock || remoteTargetLocks.size > 0) && (
+          <Layer listening={false}>
+            {[
+              ...(localTargetLock ? [[room.userId, localTargetLock] as const] : []),
+              ...remoteTargetLocks.entries(),
+            ].map(([userId, lock]) => {
+              const source = room.tokens.find((token) => token.id === lock.sourceId);
+              const target = room.tokens.find((token) => token.id === lock.targetId);
+              if (!source || !target) return null;
+              if (!isDM && (source.is_hidden || target.is_hidden)) return null;
+              const hint = coverHintBetween(
+                source,
+                target,
+                room.tokens,
+                room.walls,
+                room.fogDoors,
+                scene.grid_size,
+              );
+              const color =
+                hint.level === "full"
+                  ? "#ef4444"
+                  : hint.level === "half"
+                    ? "#f59e0b"
+                    : "#22c55e";
+              return (
+                <TargetLine
+                  key={userId}
+                  source={source}
+                  target={target}
+                  color={color}
+                  authorColor={lock.color}
+                  authorName={lock.name}
+                  cover={hint}
+                  feet={feetBetween(source.x, source.y, target.x, target.y)}
+                  viewScale={view.scale}
+                />
+              );
+            })}
+          </Layer>
+        )}
+
         {pings.length > 0 && (
           <Layer listening={false}>
             {pings.map((p) => (
@@ -2846,6 +3126,19 @@ export function SceneCanvas({
             </button>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={targetMode ? clearTargetLock : beginTargetMode}
+          title="Target: choose attacker then target"
+          className={`hidden rounded-md border px-2 py-1 text-xs font-medium shadow sm:block ${
+            targetMode || localTargetLock
+              ? "border-amber-400 bg-amber-400/20 text-amber-200"
+              : "border-neutral-700 bg-neutral-900/90 text-neutral-200 hover:bg-neutral-800"
+          }`}
+        >
+          🎯 {targetMode ? "Choose…" : localTargetLock ? "Clear target" : "Target"}
+        </button>
 
         {isDM && (
           <button
@@ -3202,6 +3495,17 @@ export function SceneCanvas({
                 ))}
                 <button
                   type="button"
+                  onClick={beginTargetMode}
+                  className={`min-h-11 rounded-lg px-2 text-xs ${
+                    targetMode || localTargetLock
+                      ? "bg-amber-400/20 text-amber-200"
+                      : "bg-neutral-900 text-neutral-300"
+                  }`}
+                >
+                  🎯 Target
+                </button>
+                <button
+                  type="button"
                   onClick={() => {
                     exitMeasure();
                     cancelPolygon();
@@ -3246,7 +3550,7 @@ export function SceneCanvas({
             </div>
           )}
 
-          {(drawingPolygon || addingDoor || drawingWall || aoeMode || measuring || laserMode) && !measureMenu && !fogMenu && !drawMode && !mobileToolMore && (
+          {(drawingPolygon || addingDoor || drawingWall || aoeMode || measuring || laserMode || targetMode || localTargetLock) && !measureMenu && !fogMenu && !drawMode && !mobileToolMore && (
             <div className="pointer-events-auto flex flex-wrap gap-2 rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
               {drawingPolygon && polygonPoints.length > 0 && (
                 <button type="button" onClick={undoPolygonPoint} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-neutral-300">Undo point</button>
@@ -3277,6 +3581,20 @@ export function SceneCanvas({
               )}
               {laserMode && (
                 <button type="button" onClick={exitLaser} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-red-300">Done laser</button>
+              )}
+              {(targetMode || localTargetLock) && (
+                <>
+                  <span className="flex min-h-11 items-center px-2 text-xs text-neutral-400">
+                    {targetMode
+                      ? targetSourceId
+                        ? "Tap a target"
+                        : "Tap your attacker"
+                      : "Target locked"}
+                  </span>
+                  <button type="button" onClick={clearTargetLock} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs text-red-300">
+                    Clear target
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -3309,6 +3627,101 @@ export function SceneCanvas({
         />
       )}
     </div>
+  );
+}
+
+function TargetLine({
+  source,
+  target,
+  color,
+  authorColor,
+  authorName,
+  cover,
+  feet,
+  viewScale,
+}: {
+  source: Token;
+  target: Token;
+  color: string;
+  authorColor: string;
+  authorName: string;
+  cover: CoverHint;
+  feet: number;
+  viewScale: number;
+}) {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const dist = Math.max(1, Math.hypot(dx, dy));
+  const sourceRadius = (source.size * 35) / 2;
+  const targetRadius = (target.size * 35) / 2;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const startX = source.x + ux * Math.min(sourceRadius, dist * 0.2);
+  const startY = source.y + uy * Math.min(sourceRadius, dist * 0.2);
+  const endX = target.x - ux * Math.min(targetRadius, dist * 0.2);
+  const endY = target.y - uy * Math.min(targetRadius, dist * 0.2);
+  const midX = (startX + endX) / 2;
+  const midY = (startY + endY) / 2;
+  const k = 1 / viewScale;
+  const blockerText =
+    cover.blockers.length > 0
+      ? ` · ${cover.blockers.slice(0, 2).join(", ")} blocking`
+      : "";
+  const label = `${cover.label} · ${feet} ft${blockerText}`;
+  const width = Math.min(250, Math.max(120, label.length * 6.4));
+
+  return (
+    <>
+      <Line
+        points={[startX, startY, endX, endY]}
+        stroke={color}
+        strokeWidth={2.5 * k}
+        dash={[9 * k, 6 * k]}
+        opacity={0.9}
+      />
+      <Circle
+        x={target.x}
+        y={target.y}
+        radius={(target.size * 35) / 2 + 7 * k}
+        stroke={color}
+        strokeWidth={3 * k}
+        dash={[7 * k, 4 * k]}
+      />
+      <Group x={midX} y={midY} scaleX={k} scaleY={k}>
+        <Rect
+          x={-width / 2}
+          y={-15}
+          width={width}
+          height={30}
+          cornerRadius={8}
+          fill="#09090b"
+          stroke={color}
+          strokeWidth={1.5}
+          opacity={0.94}
+        />
+        <Text
+          x={-width / 2 + 8}
+          y={-10}
+          width={width - 16}
+          height={20}
+          text={label}
+          fontSize={11}
+          fontStyle="bold"
+          fill={color}
+          align="center"
+          verticalAlign="middle"
+        />
+        <Circle x={-width / 2 + 7} y={-15} radius={3} fill={authorColor} />
+        <Text
+          x={-width / 2 + 13}
+          y={-26}
+          width={width - 12}
+          text={authorName}
+          fontSize={9}
+          fill={authorColor}
+        />
+      </Group>
+    </>
   );
 }
 
