@@ -1951,26 +1951,15 @@ export function SceneCanvas({
       x: (e.clientX - rect.left - view.x) / view.scale,
       y: (e.clientY - rect.top - view.y) / view.scale,
     });
-    // hp/ac aren't on the drag payload itself (that's set once at dragstart,
-    // before the DM might have tweaked the library entry) — look the asset up
-    // live from room.assets so a dropped token gets its current defaults.
-    const asset = room.assets.find((a) => a.id === payload.assetId);
+    // Same transaction as the Token library's "+ Scene" action. Reuses the
+    // latest combat state and counters if continuity is enabled on this asset.
     const { data, error } = await room.supabase
-      .from("tokens")
-      .insert({
-        scene_id: scene.id,
-        room_id: room.room!.id,
-        asset_id: payload.assetId,
-        label: payload.label,
-        image_url: payload.imageUrl,
-        x: world.x,
-        y: world.y,
-        is_hidden: true,
-        hp: asset?.hp,
-        ac: asset?.ac,
-        owner_user_id: asset?.owner_user_id ?? null,
+      .rpc("spawn_asset_token", {
+        p_scene: scene.id,
+        p_asset: payload.assetId,
+        p_x: world.x,
+        p_y: world.y,
       })
-      .select()
       .single();
     if (error || !data) {
       toast.error(error?.message ?? "Couldn't add token");

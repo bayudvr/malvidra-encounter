@@ -18,6 +18,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     imageUrl: string;
     hp: number;
     ac: number;
+    carryState: boolean;
   }) {
     const { error } = await room.supabase.from("assets").insert({
       room_id: room.room!.id,
@@ -25,6 +26,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
       image_url: values.imageUrl.trim() || null,
       hp: values.hp,
       ac: values.ac,
+      carry_state: values.carryState,
     });
     if (error) return toast.error(error.message);
     setShowCreate(false);
@@ -68,29 +70,16 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     room.reloadScene();
   }
 
-  // hp/ac copy from the asset at drop time — same "snapshot, not a live
-  // reference" pattern image_url already uses (see updateAssetImage) — so a
-  // later edit to the library entry doesn't retroactively change a token
-  // already placed (and already possibly tweaked) on a scene.
+  // The server snapshots the newest cross-scene state in ONE transaction:
+  // token + combat stats + per-token counters. Fresh NPCs still use defaults.
   async function dropToScene(asset: Asset) {
     if (!scene) return toast.error("Open a scene first");
     const g = scene.grid_size;
-    // Center of cell (2,2) so a freshly-dropped token already sits neatly
-    // inside a square instead of straddling grid lines. Starts hidden so the
-    // DM can position/adjust it before revealing it to players — same as a
-    // token dragged straight onto the map.
-    const { error } = await room.supabase.from("tokens").insert({
-      scene_id: scene.id,
-      room_id: room.room!.id,
-      asset_id: asset.id,
-      label: asset.name,
-      image_url: asset.image_url,
-      x: g * 2 + g / 2,
-      y: g * 2 + g / 2,
-      is_hidden: true,
-      hp: asset.hp,
-      ac: asset.ac,
-      owner_user_id: asset.owner_user_id,
+    const { error } = await room.supabase.rpc("spawn_asset_token", {
+      p_scene: scene.id,
+      p_asset: asset.id,
+      p_x: g * 2 + g / 2,
+      p_y: g * 2 + g / 2,
     });
     if (error) toast.error(error.message);
     else room.reloadScene();
@@ -109,12 +98,26 @@ export function AssetPanel({ room }: { room: RoomStore }) {
   // already on a scene keep whatever owner they have (reassign those from
   // the token inspector), same snapshot rule as hp/ac above.
   async function updateAssetOwner(id: string, ownerUserId: string | null) {
+    const asset = room.assets.find((a) => a.id === id);
+    const enableOnFirstAssignment = !!ownerUserId && !asset?.owner_user_id;
     const { error } = await room.supabase
       .from("assets")
-      .update({ owner_user_id: ownerUserId })
+      .update({
+        owner_user_id: ownerUserId,
+        ...(enableOnFirstAssignment ? { carry_state: true } : {}),
+      })
       .eq("id", id);
     if (error) toast.error(error.message);
     room.reload();
+  }
+
+  async function updateAssetCarryState(id: string, enabled: boolean) {
+    const { error } = await room.supabase
+      .from("assets")
+      .update({ carry_state: enabled })
+      .eq("id", id);
+    if (error) toast.error(error.message);
+    else room.reload();
   }
 
   const players = room.members.filter((m) => m.role === "player");
@@ -132,6 +135,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
             onImageChange={(newUrl) => updateAssetImage(a.id, newUrl)}
             onStatsChange={(hp, ac) => updateAssetStats(a.id, hp, ac)}
             onOwnerChange={(ownerUserId) => updateAssetOwner(a.id, ownerUserId)}
+            onCarryStateChange={(enabled) => updateAssetCarryState(a.id, enabled)}
             onDrop={() => dropToScene(a)}
             onDelete={() => deleteAsset(a.id)}
           />
@@ -172,6 +176,7 @@ function CreateAssetModal({
     imageUrl: string;
     hp: number;
     ac: number;
+    carryState: boolean;
   }) => void;
 }) {
   const [name, setName] = useState("");
@@ -181,11 +186,12 @@ function CreateAssetModal({
   // its combatant sheet when combat starts, instead of null HP/AC.
   const [hp, setHp] = useState(1);
   const [ac, setAc] = useState(1);
+  const [carryState, setCarryState] = useState(false);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
-    onCreate({ name, imageUrl, hp, ac });
+    onCreate({ name, imageUrl, hp, ac, carryState });
   }
 
   return (
@@ -226,9 +232,17 @@ function CreateAssetModal({
             />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-xs text-neutral-300">
+          <input
+            type="checkbox"
+            checked={carryState}
+            onChange={(e) => setCarryState(e.target.checked)}
+          />
+          Continue latest state between scenes
+        </label>
         <p className="text-xs text-neutral-500">
-          Used as this token&apos;s starting HP/AC when it&apos;s added to
-          combat — edit anytime, per token too.
+          New tokens use these starting stats unless continuity is enabled.
+          Turn it on for persistent characters and off for repeatable monsters.
         </p>
         <Button type="submit" size="sm" className="w-full">
           Add to library
@@ -246,6 +260,7 @@ function AssetRow({
   onImageChange,
   onStatsChange,
   onOwnerChange,
+  onCarryStateChange,
   onDrop,
   onDelete,
 }: {
@@ -256,6 +271,7 @@ function AssetRow({
   onImageChange: (url: string) => void;
   onStatsChange: (hp: number, ac: number) => void;
   onOwnerChange: (ownerUserId: string | null) => void;
+  onCarryStateChange: (enabled: boolean) => void;
   onDrop: () => void;
   onDelete: () => void;
 }) {
@@ -371,6 +387,14 @@ function AssetRow({
           </option>
         ))}
       </select>
+      <label className="ml-9 flex items-center gap-2 text-[11px] text-neutral-400">
+        <input
+          type="checkbox"
+          checked={asset.carry_state}
+          onChange={(e) => onCarryStateChange(e.target.checked)}
+        />
+        Continue latest state between scenes
+      </label>
     </li>
   );
 }

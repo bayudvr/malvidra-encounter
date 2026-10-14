@@ -72,6 +72,7 @@ export interface Database {
           hp: number;
           ac: number;
           owner_user_id: string | null;
+          carry_state: boolean;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -81,6 +82,7 @@ export interface Database {
           hp?: number;
           ac?: number;
           owner_user_id?: string | null;
+          carry_state?: boolean;
           created_at?: string;
         };
         Update: {
@@ -89,6 +91,7 @@ export interface Database {
           hp?: number;
           ac?: number;
           owner_user_id?: string | null;
+          carry_state?: boolean;
         };
         Relationships: [];
       };
@@ -180,6 +183,7 @@ export interface Database {
           monster_name: string | null;
           monster_source: string | null;
           monster_cr: string | null;
+          state_changed_at: string;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -303,6 +307,7 @@ export interface Database {
           user_id: string | null;
           token_id: string | null;
           conditions: string[];
+          is_hidden: boolean;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -319,6 +324,7 @@ export interface Database {
           user_id?: string | null;
           token_id?: string | null;
           conditions?: string[];
+          is_hidden?: boolean;
           created_at?: string;
         };
         Update: {
@@ -331,6 +337,7 @@ export interface Database {
           ac?: number | null;
           conditions?: string[];
           token_id?: string | null;
+          is_hidden?: boolean;
         };
         Relationships: [];
       };
@@ -562,6 +569,16 @@ export interface Database {
     Functions: {
       join_room: { Args: { p_code: string }; Returns: string };
       seed_scene_combatants: { Args: { p_scene: string }; Returns: undefined };
+      spawn_asset_token: {
+        Args: {
+          p_scene: string;
+          p_asset: string;
+          p_x: number;
+          p_y: number;
+          p_fresh?: boolean;
+        };
+        Returns: Database["public"]["Tables"]["tokens"]["Row"];
+      };
       is_room_member: { Args: { p_room: string }; Returns: boolean };
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
       send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
