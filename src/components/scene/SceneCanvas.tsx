@@ -4135,6 +4135,7 @@ function MultiTokenBar({
         is_player: !!t.owner_user_id,
         user_id: t.owner_user_id,
         token_id: t.id,
+        is_hidden: t.is_hidden,
         sort_order: base + i,
       })),
     );
@@ -4523,6 +4524,7 @@ function TokenInspector({
       is_player: !!token.owner_user_id,
       user_id: token.owner_user_id,
       token_id: token.id,
+      is_hidden: token.is_hidden,
       sort_order: room.combatants.length,
       // token.hp doubles as max_hp — nothing has depleted it yet, same as
       // seed_scene_combatants (supabase/migrations/0015_token_battle_stats.sql).
