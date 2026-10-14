@@ -439,6 +439,35 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      room_counters: {
+        Row: {
+          id: string;
+          room_id: string;
+          name: string;
+          current: number;
+          max: number;
+          visibility: "public" | "private";
+          sort_order: number;
+        } & Timestamps;
+        Insert: {
+          id?: string;
+          room_id: string;
+          name?: string;
+          current?: number;
+          max?: number;
+          visibility?: "public" | "private";
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          name?: string;
+          current?: number;
+          max?: number;
+          visibility?: "public" | "private";
+          sort_order?: number;
+        };
+        Relationships: [];
+      };
       token_counters: {
         Row: {
           id: string;

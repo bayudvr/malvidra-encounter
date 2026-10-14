@@ -11,6 +11,7 @@ import type { Role } from "@/lib/room/types";
 import { useToast } from "@/components/toast";
 import { SceneList } from "@/components/room/SceneList";
 import { MemberPanel } from "@/components/room/MemberPanel";
+import { RoomCountersPanel } from "@/components/room/RoomCountersPanel";
 import { AssetPanel } from "@/components/room/AssetPanel";
 import { RoomWebhookPanel } from "@/components/room/RoomWebhookPanel";
 import { SceneSettings } from "@/components/room/SceneSettings";
@@ -215,6 +216,7 @@ export function RoomView({
           {isDM && scene && <SceneSettings room={room} scene={scene} />}
           {isDM && <AssetPanel room={room} />}
           {isDM && <RoomWebhookPanel room={room} />}
+          <RoomCountersPanel room={room} isDM={isDM} />
           <MemberPanel room={room} roomName={room.room?.name ?? roomName} />
         </aside>
 
