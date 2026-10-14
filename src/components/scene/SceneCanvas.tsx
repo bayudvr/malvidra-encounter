@@ -1959,8 +1959,7 @@ export function SceneCanvas({
         p_asset: payload.assetId,
         p_x: world.x,
         p_y: world.y,
-      })
-      .single();
+      });
     if (error || !data) {
       toast.error(error?.message ?? "Couldn't add token");
       return;
