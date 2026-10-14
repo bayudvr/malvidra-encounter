@@ -4,7 +4,13 @@
 -- Existing player-owned assets are opted in; DM can toggle per library asset.
 alter table public.assets
   add column if not exists carry_state boolean not null default false;
-update public.assets set carry_state = true where owner_user_id is not null;
+update public.assets a
+  set carry_state = true
+  where owner_user_id is not null
+    or exists (
+      select 1 from public.tokens t
+      where t.asset_id = a.id and t.owner_user_id is not null
+    );
 
 -- Tracks meaningful changes, not movement or scene coordinates.
 alter table public.tokens
@@ -60,16 +66,18 @@ language plpgsql
 set search_path = public, pg_temp
 as $$
 begin
-  if new.token_id is not null
-     and (tg_op = 'INSERT' or row(old.hp, old.max_hp, old.temp_hp, old.ac, old.conditions)
-         is distinct from row(new.hp, new.max_hp, new.temp_hp, new.ac, new.conditions)) then
+  if new.token_id is null then return new; end if;
+  if tg_op = 'INSERT' then
+    update public.tokens set state_changed_at = clock_timestamp()
+      where id = new.token_id;
+  elsif row(old.hp, old.max_hp, old.temp_hp, old.ac, old.conditions)
+     is distinct from row(new.hp, new.max_hp, new.temp_hp, new.ac, new.conditions) then
     update public.tokens set state_changed_at = clock_timestamp()
       where id = new.token_id;
   end if;
   return new;
 end;
 $$;
--- Avoid referring to OLD in INSERT paths via boolean OR: PL/pgSQL short-circuits OR.
 drop trigger if exists combatants_state_change on public.combatants;
 create trigger combatants_state_change
   after insert or update of hp, max_hp, temp_hp, ac, conditions
@@ -176,7 +184,7 @@ begin
   values (
     p_scene, v_scene.room_id, p_asset, v_asset.name, v_asset.image_url, p_x, p_y,
     coalesce(v_source.size, 1), v_source.color,
-    v_asset.owner_user_id, true,
+    coalesce(v_asset.owner_user_id, v_source.owner_user_id), true,
     coalesce(v_combat.max_hp, v_source.hp, v_asset.hp),
     coalesce(v_combat.ac, v_source.ac, v_asset.ac),
     v_source.vision_radius_ft

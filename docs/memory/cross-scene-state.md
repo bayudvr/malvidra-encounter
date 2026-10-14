@@ -8,6 +8,7 @@ Purpose: dropping a library token in a different scene should start from its
 - DM toggles **Continue state between scenes** per library asset.
   The 0031 migration enables it for existing player-owned assets; generic
   monster assets default to OFF so repeated monster spawns stay fresh.
+  Existing assets with a player-owned scene token are also opted in.
   Assigning a player owner to an unowned asset enables continuity automatically.
 - Both + Scene and canvas drag/drop call `spawn_asset_token`. It is an
   authenticated, DM-authorized, transactional RPC. Only rows from the same
@@ -17,7 +18,7 @@ Purpose: dropping a library token in a different scene should start from its
   from library defaults. For combatants, carry current HP, max HP, temp HP,
   AC, and conditions. Also copy per-token custom counters, size, color,
   and vision radius. Library asset remains the authority on token name/image
-  and owner. Position, fog, initiative, active turn and scene-local auras
+  and a configured owner; otherwise the last token's owner is reused. Position, fog, initiative, active turn and scene-local auras
   remain new-scene-specific.
 - The clone is a *snapshot when placed*, not two live-synced tokens.
   Later edits to the older token are tracked with `state_changed_at`, so
