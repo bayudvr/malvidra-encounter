@@ -2,7 +2,8 @@
 
 The DM opens **Twist & Dread** in the room sidebar, chooses the quota Q and the
 players taking part in this session, then starts the session. N is the number
-of selected players, excluding the DM. Guest players can participate.
+of selected players, excluding the DM and spectators. Guest accounts can participate
+once the DM makes them players in **Members**.
 
 | Resource | Initial value | Maximum |
 | --- | --- | --- |
@@ -19,6 +20,10 @@ leaving, or switching scenes does not recalculate or reset them. A new session
 resets the balances after the DM confirms. Resolve pending rerolls first; the
 DM can close an abandoned one by keeping its original result. Historical
 sessions/events remain stored, though the panel shows the active session.
+Making a player a spectator keeps their existing balance as inactive; neither
+they nor the DM can spend or distribute their Twist until they become a player
+again. This does not recalculate the current session's capacity. A newly promoted
+player needs to be included in the next session setup to receive resources.
 
 ## Using resources
 

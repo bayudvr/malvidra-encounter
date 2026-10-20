@@ -1,4 +1,4 @@
-import type { Database, Tables } from "@/lib/database.types";
+import type { Database, Tables, MemberRole } from "@/lib/database.types";
 
 export type Room = Tables<"rooms">;
 export type Scene = Tables<"scenes">;
@@ -30,8 +30,8 @@ export type FogDoorUpdate = Database["public"]["Tables"]["fog_doors"]["Update"];
 export type Member = {
   id: string;
   user_id: string;
-  role: "dm" | "player";
+  role: MemberRole;
   display_name: string;
 };
 
-export type Role = "dm" | "player";
+export type Role = MemberRole;

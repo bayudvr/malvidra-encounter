@@ -3,14 +3,17 @@
 Initiative tracker + battle map for tabletop RPG encounters.
 
 - **DM** signs up (email + password), creates a **room**, shares an invite link.
-- **Players** open the invite link and join as a **guest** — just a name, no account
-  (Supabase anonymous auth). Only the DM needs a real account.
+- **Members** open the invite link and can join as a **guest** — just a name, no account
+  (Supabase anonymous auth). New members enter as **spectators**; the DM chooses who
+  becomes a **player**. Only the DM needs a real account.
 - A room holds many **scenes** (one scene = one encounter).
 - Each scene has a **map** (image URL) with draggable **tokens** and a grid.
 - A scene runs in **exploration** or **combat** mode. Combat opens the **initiative tracker**.
 - Everything syncs in real time to every participant via Supabase Realtime.
 
 ## DM action and roll requests
+
+See [players and spectators](docs/spectators.md) for membership roles and controls.
 
 DMs can send persistent action or d20-roll requests to a player. See
 [usage, migration, and verification](docs/action-requests.md).

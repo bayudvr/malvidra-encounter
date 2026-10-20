@@ -4,7 +4,7 @@ import type { HouseSession, HousePlayer, HouseEvent, HouseReroll } from "@/lib/t
 // Regenerate with: npx supabase gen types typescript --project-id <id> > src/lib/database.types.ts
 
 export type SceneMode = "exploration" | "combat";
-export type MemberRole = "dm" | "player";
+export type MemberRole = "dm" | "player" | "spectator";
 
 /** One die group in a roll, e.g. { sides: 6, values: [3, 5] }. */
 export type DiceDetail = { sides: number; values: number[] };
@@ -595,6 +595,10 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      set_room_member_role: {
+        Args: { p_room: string; p_user: string; p_role: "player" | "spectator" };
+        Returns: undefined;
+      };
       setup_house_session: {
         Args: { p_room: string; p_quota: number; p_players: string[]; p_operation: string };
         Returns: HouseSession[];

@@ -54,7 +54,7 @@ export function GuestJoin({ code }: { code: string }) {
 
   return (
     <div className="w-full max-w-sm">
-      <h1 className="mb-1 text-2xl font-bold text-amber-400">Join the game</h1>
+      <h1 className="mb-1 text-2xl font-bold text-amber-400">Join the room</h1>
       <p className="mb-6 text-sm text-neutral-400">
         Invite code <span className="font-mono text-neutral-200">{code}</span>
       </p>
@@ -63,6 +63,7 @@ export function GuestJoin({ code }: { code: string }) {
         onSubmit={joinAsGuest}
         className="space-y-4 rounded-lg border border-neutral-800 bg-neutral-900/60 p-5"
       >
+        <p className="text-xs text-neutral-400">You join as a spectator. The DM can make you a player.</p>
         <div>
           <Label htmlFor="name">Your name</Label>
           <Input

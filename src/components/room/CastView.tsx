@@ -30,7 +30,7 @@ function CastSkeleton() {
  * The authed route (`/rooms/<id>/cast`) is DM-only; the public
  * `/cast/<token>` route passes `castToken` and runs anonymously (header auth,
  * polling instead of Realtime). Either way the perspective is forced to
- * "player" here so nothing DM-only can leak onto the projector.
+ * read-only spectator here so nothing DM-only can leak onto the projector.
  */
 export function CastView({
   roomId,
@@ -50,8 +50,8 @@ export function CastView({
   const room = useRoomState(
     roomId,
     userId,
-    "player",
-    castClient ? { client: castClient, realtime: false } : undefined,
+    "spectator",
+    { readOnly: true, ...(castClient ? { client: castClient, realtime: false } : {}) },
   );
   const scene = room.activeScene;
   const inCombat = scene?.mode === "combat";

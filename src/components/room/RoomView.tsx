@@ -56,7 +56,8 @@ export function RoomView({
 }) {
   const router = useRouter();
   const room = useRoomState(roomId, userId, role);
-  const isDM = role === "dm";
+  const isDM = room.role === "dm";
+  const spectator = room.role === "spectator";
   const scene = room.activeScene;
   const inCombat = scene?.mode === "combat";
 
@@ -74,7 +75,7 @@ export function RoomView({
   return (
     <TwistDreadProvider room={room}>
     <div className="flex h-dvh flex-col">
-      <ActionRequests room={room} />
+      <ActionRequests key={room.role} room={room} />
       <ChatBox room={room} />
       <header className="relative flex items-center justify-between gap-2 border-b border-neutral-800 px-2 py-1.5 sm:px-4 sm:py-2">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
@@ -149,8 +150,8 @@ export function RoomView({
           {isDM && (
             <CastControls roomId={roomId} castToken={room.room?.cast_token} />
           )}
-          {!isDM && <span className="text-xs text-sky-300">Player view</span>}
-          <PlayerRequests room={room} isDM={isDM} />
+          {!isDM && <span className="text-xs text-sky-300">{spectator ? "Spectator · watching" : "Player view"}</span>}
+          {!spectator && <PlayerRequests room={room} isDM={isDM} />}
           {inCombat && isDM && (
             <button
               type="button"
@@ -227,7 +228,7 @@ export function RoomView({
         <main className="relative min-w-0 flex-1 bg-neutral-950">
           {inCombat && scene && <InitiativeBar room={room} scene={scene} />}
           {scene ? (
-            <SceneCanvas room={room} scene={scene} />
+            <SceneCanvas key={room.role} room={room} scene={scene} />
           ) : (
             <div className="flex h-full items-center justify-center p-6 text-center text-sm text-neutral-600">
               {isDM

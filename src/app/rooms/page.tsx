@@ -114,7 +114,7 @@ export default async function RoomsPage() {
                 key={room.id}
                 id={room.id}
                 name={room.name}
-                role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "player")}
+                role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "spectator")}
                 archived={false}
                 yourTurn={yourTurnRoomIds.has(room.id)}
               />
@@ -139,7 +139,7 @@ export default async function RoomsPage() {
                   key={room.id}
                   id={room.id}
                   name={room.name}
-                  role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "player")}
+                  role={room.dm_id === user.id ? "dm" : (roleByRoom.get(room.id) ?? "spectator")}
                   archived
                 />
               ))}

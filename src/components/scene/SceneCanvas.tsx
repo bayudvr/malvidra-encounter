@@ -365,6 +365,7 @@ export function SceneCanvas({
 }) {
   const toast = useToast();
   const isDM = room.role === "dm";
+  const readOnly = castMode || room.role === "spectator";
 
   // Speech bubbles (TokenSprite) — latest still-fresh chat message spoken as
   // each token. room.chatMessages is oldest-first and room-wide (not
@@ -610,7 +611,7 @@ export function SceneCanvas({
 
   // Desktop shortcut: hold L to use the shared laser without switching tools.
   useEffect(() => {
-    if (castMode) return;
+    if (readOnly) return;
     function editableTarget(target: EventTarget | null) {
       const el = target as HTMLElement | null;
       return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
@@ -648,7 +649,7 @@ export function SceneCanvas({
       window.removeEventListener("keyup", onUp);
       window.removeEventListener("blur", onBlur);
     };
-  }, [castMode, room.userId, scene.id]);
+  }, [readOnly, room.userId, scene.id]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -1117,7 +1118,7 @@ export function SceneCanvas({
 
   function sendPing(e: Konva.KonvaEventObject<PointerEvent>) {
     e.evt.preventDefault();
-    if (castMode) return;
+    if (readOnly) return;
     const p = worldPointer(e);
     if (!p) return;
     const ping: Ping = {
@@ -1536,7 +1537,7 @@ export function SceneCanvas({
   }
 
   function stagePointerDown(e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) {
-    if (castMode) return;
+    if (readOnly) return;
     // Right-click is the ping (onContextMenu) — keep it from also acting as a tool click.
     if ("button" in e.evt && e.evt.button !== 0) return;
     if ("touches" in e.evt && e.evt.touches.length > 1) {
@@ -1624,6 +1625,7 @@ export function SceneCanvas({
       pinchMove(e as Konva.KonvaEventObject<TouchEvent>);
       return;
     }
+    if (readOnly) return;
     if (laserActive && (laserKeyHeld || laserDrawing.current)) {
       const p = worldPointer(e);
       if (p) sendLaserAt(p);
@@ -1680,7 +1682,7 @@ export function SceneCanvas({
   }
 
   function stagePointerUp() {
-    if (castMode) return;
+    if (readOnly) return;
     if (laserDrawing.current) {
       if (laserMode) clearLaser();
       else laserDrawing.current = false;
@@ -2405,7 +2407,7 @@ export function SceneCanvas({
           {room.tokens
             .filter((t) => isDM || !t.is_hidden)
             .map((t) => {
-              const owned = t.owner_user_id === room.userId;
+              const owned = room.role === "player" && t.owner_user_id === room.userId;
               // Not gated on inCombat: seed_scene_combatants (0002/0015) deliberately keeps a
               // token's combatant row across an End Combat toggle ("without losing initiative or
               // HP") specifically so a downed/wounded look still shows afterward — only "Reset
@@ -2417,7 +2419,7 @@ export function SceneCanvas({
                   token={t}
                   gridSize={scene.grid_size}
                   draggable={
-                    !castMode &&
+                    !readOnly &&
                     (isDM || owned) &&
                     !measuring &&
                     !targetMode &&
@@ -2967,7 +2969,7 @@ export function SceneCanvas({
         height={size.h}
       />
 
-      {!castMode && (
+      {!readOnly && (
       <div className="absolute bottom-2 left-2 z-20 flex items-end gap-1 sm:gap-2">
         <div className="relative">
           <button
@@ -3436,7 +3438,7 @@ export function SceneCanvas({
       </div>
       )}
 
-      {!castMode && (
+      {!readOnly && (
         <div className="pointer-events-none absolute inset-x-2 bottom-16 z-30 sm:hidden">
           {measureMenu && (
             <div className="pointer-events-auto rounded-xl border border-neutral-700 bg-neutral-950/95 p-2 shadow-2xl backdrop-blur">
@@ -3808,7 +3810,7 @@ export function SceneCanvas({
         />
       )}
 
-      {!isDM && selectedToken && selectedToken.owner_user_id === room.userId && (
+      {room.role === "player" && selectedToken && selectedToken.owner_user_id === room.userId && (
         <PlayerTokenPanel
           key={selectedToken.id}
           room={room}

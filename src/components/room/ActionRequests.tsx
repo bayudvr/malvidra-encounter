@@ -104,6 +104,8 @@ export function ActionRequests({ room }: { room: RoomStore }) {
     } finally { setBusy(null); }
   }
 
+  if (room.role === "spectator") return <DiceTray room={room} />;
+
   return (
     <>
       <DiceTray room={room} request={selectedRoll} onRequestClose={() => setRollId(null)}

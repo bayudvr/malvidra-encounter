@@ -16,7 +16,7 @@ export function TwistDreadPanel({ room }: { room: RoomStore }) {
   const lock = useRef(false);
   const [amounts, setAmounts] = useState<Record<string, number>>({});
   const session = house.session;
-  const own = house.players.find((p) => p.user_id === room.userId);
+  const own = room.role === "player" ? house.players.find((p) => p.user_id === room.userId) : undefined;
   const name = (id: string | null) => room.members.find((m) => m.user_id === id)?.display_name ?? "Former player";
 
   async function spendResource(kind: "twist" | "dread" | "distribute", target?: string, amount = 1) {
@@ -45,10 +45,10 @@ export function TwistDreadPanel({ room }: { room: RoomStore }) {
         <p className="text-[10px] text-neutral-500">Quota {session.quota} × {session.player_count} session players = {session.capacity}. Fixed until a new session starts.</p>
         <ul className="space-y-2">
           {house.players.map((p) => {
-            const available = room.members.some((m) => m.user_id === p.user_id);
+            const available = room.members.some((m) => m.user_id === p.user_id && m.role === "player");
             const amount = amounts[p.user_id] ?? 1;
             return <li key={p.user_id} className="rounded-lg border border-neutral-800 p-2 text-xs">
-              <div className="flex items-center justify-between gap-2"><span className="truncate">{name(p.user_id)}{p.user_id === room.userId ? " (you)" : ""}</span><strong className="shrink-0 text-amber-200">{p.twist}/{session.quota} Twist</strong></div>
+              <div className="flex items-center justify-between gap-2"><span className="truncate">{name(p.user_id)}{p.user_id === room.userId ? " (you)" : ""}{!available ? " (inactive)" : ""}</span><strong className="shrink-0 text-amber-200">{p.twist}/{session.quota} Twist</strong></div>
               {dm && <div className="mt-2 flex items-center gap-1">
                 <input aria-label={`Twist to distribute to ${name(p.user_id)}`} type="number" min={1} max={session.quota} step={1} value={amount}
                   onChange={(e) => setAmounts((prev) => ({ ...prev, [p.user_id]: Number(e.target.value) }))} className="w-12 rounded bg-neutral-800 px-1 py-1" />
@@ -58,15 +58,15 @@ export function TwistDreadPanel({ room }: { room: RoomStore }) {
             </li>;
           })}
         </ul>
-        <details className="text-xs text-neutral-400"><summary className="cursor-pointer">External / private roll</summary>
+        {room.role !== "spectator" && <details className="text-xs text-neutral-400"><summary className="cursor-pointer">External / private roll</summary>
           <p className="my-2 text-[11px]">Use these after a roll outside the shared log. For public dice, use Twist/Dread in the dice history.</p>
           <div className="flex flex-wrap gap-2">
             {own && <Button size="sm" variant="secondary" disabled={busy || !!house.error || own.twist < 1} onClick={() => void spendResource("twist", room.userId)}>Spend 1 Twist</Button>}
             {dm && <Button size="sm" variant="secondary" disabled={busy || !!house.error || session.dread < 1} onClick={() => void spendResource("dread")}>Spend 1 Dread</Button>}
           </div>
           {dm && <p className="mt-2 text-[11px]">Record a player&apos;s external Twist use:</p>}
-          {dm && house.players.map((p) => <Button key={p.user_id} size="sm" variant="ghost" disabled={busy || !!house.error || p.twist < 1 || !room.members.some((m) => m.user_id === p.user_id)} onClick={() => void spendResource("twist", p.user_id)}>{name(p.user_id)} · spend 1</Button>)}
-        </details>
+          {dm && house.players.map((p) => <Button key={p.user_id} size="sm" variant="ghost" disabled={busy || !!house.error || p.twist < 1 || !room.members.some((m) => m.user_id === p.user_id && m.role === "player")} onClick={() => void spendResource("twist", p.user_id)}>{name(p.user_id)} · spend 1</Button>)}
+        </details>}
         {house.events.length > 0 && <details className="text-xs text-neutral-400"><summary className="cursor-pointer">Recent resource activity</summary>
           <ul className="mt-2 max-h-40 space-y-2 overflow-y-auto">{house.events.map((e) => <li key={e.id}>
             <span className="text-neutral-200">{e.kind === "setup" ? "Session started" : e.kind === "distribute" ? `${e.amount} Twist → ${name(e.target_user_id)}` : `${name(e.kind === "twist" ? e.target_user_id : e.actor_user_id)} used ${e.kind}`}</span>
@@ -100,9 +100,9 @@ function SessionSetup({ room, onDone }: { room: RoomStore; onDone: () => void })
   return <form onSubmit={start} className="mb-3 space-y-2 border-b border-neutral-800 pb-3">
     <Label htmlFor="twist-quota">Twist per player this session</Label>
     <Input id="twist-quota" type="number" min={1} max={100} step={1} required value={quota} onChange={(e) => setQuota(Number(e.target.value))} />
-    <p className="text-xs text-neutral-400">Players taking part:</p>
+    <p className="text-xs text-neutral-400">Players taking part (spectators are excluded):</p>
     {players.map((p) => <label key={p.user_id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!excluded.includes(p.user_id)} onChange={(e) => setExcluded((prev) => e.target.checked ? prev.filter((id) => id !== p.user_id) : [...prev, p.user_id])} />{p.display_name}</label>)}
-    {!players.length && <p className="text-xs text-neutral-500">Invite a player first.</p>}
+    {!players.length && <p className="text-xs text-neutral-500">Make a room member a player in Members first.</p>}
     <p className="rounded bg-neutral-950 p-2 text-xs text-neutral-300">Each player: {quota}/{quota} Twist<br />DM Dread: {selected.length}/{quota * selected.length}<br />Twist Pool: 0/{quota * selected.length}</p>
     {pending && <p className="text-xs text-amber-200">Resolve pending rerolls in the dice tray before starting a new session. The DM can close one by keeping its original result.</p>}
     <Button size="sm" type="submit" disabled={busy || !!house.error || pending || selected.length === 0 || !Number.isInteger(quota) || quota < 1 || quota > 100}>{busy ? "Starting…" : house.session ? "Start new session" : "Start session"}</Button>

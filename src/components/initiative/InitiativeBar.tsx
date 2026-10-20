@@ -17,7 +17,7 @@ export function InitiativeBar({ room, scene }: { room: RoomStore; scene: Scene }
   const activeId = scene.active_combatant_id;
   const activeIndex = list.findIndex((c) => c.id === activeId);
   const activeCombatant = activeIndex < 0 ? null : list[activeIndex];
-  const isOwnTurn = !isDM && !!activeCombatant?.is_player && activeCombatant.user_id === room.userId;
+  const isOwnTurn = room.role === "player" && !!activeCombatant?.is_player && activeCombatant.user_id === room.userId;
   const [busy, setBusy] = useState(false);
   // These are neighbours in the roster, not a prediction of who takes the next turn.
   // Keep the active portrait centred and never repeat a combatant in small parties.

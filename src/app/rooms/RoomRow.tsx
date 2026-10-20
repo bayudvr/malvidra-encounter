@@ -16,7 +16,7 @@ export function RoomRow({
 }: {
   id: string;
   name: string;
-  role: "dm" | "player";
+  role: "dm" | "player" | "spectator";
   archived: boolean;
   yourTurn?: boolean;
 }) {
@@ -60,7 +60,7 @@ export function RoomRow({
                 : "bg-sky-500/15 text-sky-300"
             }
           >
-            {role === "dm" ? "DM" : "Player"}
+            {role === "dm" ? "DM" : role === "player" ? "Player" : "Spectator"}
           </Badge>
           {role === "dm" && (
             <button

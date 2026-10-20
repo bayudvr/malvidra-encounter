@@ -9,7 +9,8 @@
     "lint": "eslint",
     "db:push": "node scripts/db-push.mjs",
     "test:action-requests": "node tests/action-requests.db.mjs",
-    "test:twist-dread": "node tests/twist-dread.db.mjs"
+    "test:twist-dread": "node tests/twist-dread.db.mjs",
+    "test:spectators": "node tests/spectators.db.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box": "^1.1.4",

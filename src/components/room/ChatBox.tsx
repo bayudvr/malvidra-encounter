@@ -39,7 +39,7 @@ export function ChatBox({ room }: { room: RoomStore }) {
 
   async function send() {
     const body = draft.trim();
-    if (!body || sending || !room.room) return;
+    if (!body || sending || !room.room || room.role === "spectator") return;
 
     const speakerName = speakerTokenId
       ? (speakableTokens.find((t) => t.id === speakerTokenId)?.label ?? "Someone")
@@ -101,7 +101,7 @@ export function ChatBox({ room }: { room: RoomStore }) {
             )}
           </div>
 
-          <div className="space-y-1.5 border-t border-neutral-800 p-2">
+          {room.role === "spectator" ? <p className="border-t border-neutral-800 p-2 text-xs text-neutral-500">Watching · chat is read-only</p> : <div className="space-y-1.5 border-t border-neutral-800 p-2">
             <select
               value={speakerTokenId}
               onChange={(e) => setSpeakerTokenId(e.target.value)}
@@ -138,7 +138,7 @@ export function ChatBox({ room }: { room: RoomStore }) {
                 Send
               </button>
             </div>
-          </div>
+          </div>}
         </div>
       )}
     </>

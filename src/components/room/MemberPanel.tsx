@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Badge, Button, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
@@ -16,6 +16,8 @@ export function MemberPanel({
   const toast = useToast();
   const isDM = room.role === "dm";
   const [copied, setCopied] = useState(false);
+  const [changing, setChanging] = useState(false);
+  const roleLock = useRef(false);
   const code = room.room?.invite_code;
 
   const inviteLink =
@@ -52,7 +54,7 @@ export function MemberPanel({
   }
 
   async function kick(memberId: string) {
-    if (!confirm("Remove this player from the room?")) return;
+    if (!confirm("Remove this member from the room?")) return;
     const { error } = await room.supabase
       .from("room_members")
       .delete()
@@ -61,8 +63,26 @@ export function MemberPanel({
     room.reload();
   }
 
+  async function changeRole(userId: string, nextRole: "player" | "spectator") {
+    if (roleLock.current || !room.room) return;
+    if (nextRole === "spectator" && !confirm("Make this member a spectator? Their token and session balances are kept, but they cannot play. Current session capacity stays fixed until the next setup.")) return;
+    roleLock.current = true;
+    setChanging(true);
+    try {
+      const { error } = await room.supabase.rpc("set_room_member_role", {
+        p_room: room.room.id, p_user: userId, p_role: nextRole,
+      });
+      if (error) throw error;
+      await room.reload();
+      room.notifyMembersChanged();
+      toast.success(nextRole === "player" ? "Member is now a player" : "Member is now watching");
+    } catch { toast.error("Could not change member role"); }
+    finally { roleLock.current = false; setChanging(false); }
+  }
+
   return (
-    <Panel title={`Party · ${roomName}`}>
+    <Panel title={`Members · ${roomName}`}>
+      <p className="mb-2 text-xs text-neutral-500">{room.members.filter((m) => m.role === "player").length} players · {room.members.filter((m) => m.role === "spectator").length} spectators. New members join as spectators.</p>
       {isDM && code && (
         <div className="mb-3 rounded border border-neutral-800 bg-neutral-950 p-2">
           <p className="text-[10px] uppercase tracking-wide text-neutral-500">
@@ -128,11 +148,18 @@ export function MemberPanel({
               >
                 {m.role}
               </Badge>
-              {isDM && m.role === "player" && (
+              {isDM && m.role !== "dm" && (
+                <Button size="sm" variant="ghost" disabled={changing}
+                  aria-label={`Make ${m.display_name} ${m.role === "player" ? "a spectator" : "a player"}`}
+                  onClick={() => void changeRole(m.user_id, m.role === "player" ? "spectator" : "player")}>
+                  {m.role === "player" ? "Watch" : "Play"}
+                </Button>
+              )}
+              {isDM && m.role !== "dm" && (
                 <button
                   className="px-1 text-neutral-500 hover:text-red-400"
                   onClick={() => kick(m.id)}
-                  aria-label="Remove player"
+                  aria-label={`Remove ${m.display_name}`}
                 >
                   ✕
                 </button>

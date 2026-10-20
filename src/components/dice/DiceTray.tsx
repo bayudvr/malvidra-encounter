@@ -120,7 +120,8 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
   const houseRoll = !request ? house.rerolls.find((r) => r.id === houseRollId && r.status !== "resolved") ?? null : null;
   const [houseResults, setHouseResults] = useState<Record<string, DiceDetail[]>>({});
   const retryHouse = houseRoll ? houseResults[houseRoll.id] : undefined;
-  const ownTwist = house.players.find((p) => p.user_id === room.userId)?.twist ?? 0;
+  const spectator = room.role === "spectator";
+  const ownTwist = spectator ? 0 : house.players.find((p) => p.user_id === room.userId)?.twist ?? 0;
   const [open, setOpen] = useState(false);
   const [pool, setPool] = useState<Record<number, number>>({});
   const [modifier, setModifier] = useState(0);
@@ -380,6 +381,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
   }
 
   async function roll() {
+    if (spectator) return;
     if (diceCount === 0 || rollLock.current || houseRoll?.status === "rolled") return;
     if (houseRoll && retryHouse) {
       rollLock.current = true; setRolling(true);
@@ -529,7 +531,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       <button
         type="button"
         onClick={() => (trayOpen ? closeTray() : setOpen(true))}
-        aria-label="Dice roller"
+        aria-label={spectator ? "Public roll history" : "Dice roller"}
         className="fixed bottom-3 right-2 z-[62] flex h-10 w-10 items-center justify-center rounded-b-xl rounded-t-md border border-neutral-700 bg-neutral-900/95 text-lg shadow-lg backdrop-blur transition-colors hover:bg-neutral-800 sm:bottom-4 sm:right-4 sm:h-12 sm:w-12 sm:rounded-full sm:text-xl"
       >
         🎲
@@ -565,7 +567,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
             </button>
           </div>
 
-          <div className="space-y-2 p-3">
+          {!spectator && <div className="space-y-2 p-3">
             {houseRoll && <div className="space-y-2 rounded border border-purple-500/30 bg-purple-500/10 p-2 text-xs text-purple-200">
               <p className="font-semibold">{houseRoll.resource.toUpperCase()} · {houseRoll.actor_name}</p>
               <p>{houseRoll.notation} · original {houseRoll.old_total}</p>
@@ -713,10 +715,11 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
                     ? `Roll  ${notation}`
                     : "Roll"}
             </button>}
-          </div>
+          </div>}
+          {spectator && <p className="p-3 text-xs text-neutral-500">Watching · public roll history</p>}
 
           <div className="min-h-0 flex-1 overflow-y-auto border-t border-neutral-800 p-2">
-            {house.rerolls.some((r) => r.status !== "resolved" && (r.actor_user_id === room.userId || room.role === "dm")) && (
+            {!spectator && house.rerolls.some((r) => r.status !== "resolved" && (r.actor_user_id === room.userId || room.role === "dm")) && (
               <div className="mb-2 space-y-2 rounded-lg border border-purple-500/30 p-2 text-xs">
                 <p className="font-semibold text-purple-200">Pending rerolls</p>
                 {house.rerolls.filter((r) => r.status !== "resolved" && (r.actor_user_id === room.userId || room.role === "dm")).map((r) => <div key={r.id} className="space-y-1">
@@ -772,7 +775,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
                     {house.session && !house.error && !r.superseded_by && !house.rerolls.some((pending) => pending.base_roll_id === r.id && pending.status !== "resolved") && Date.parse(r.created_at) >= Date.parse(house.session.created_at) && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {r.user_id === room.userId && ownTwist > 0 && <button type="button" disabled={rolling} onClick={() => void startHouseReroll(r, "twist", "choose")} className="rounded bg-amber-500/15 px-2 py-1 text-amber-200 disabled:opacity-50">Use Twist</button>}
-                        {room.role === "dm" && house.session.dread > 0 && (!room.members.some((m) => m.user_id === r.user_id && m.role === "player") || house.players.some((p) => p.user_id === r.user_id)) && (
+                        {room.role === "dm" && house.session.dread > 0 && !room.members.some((m) => m.user_id === r.user_id && m.role === "spectator") && (!room.members.some((m) => m.user_id === r.user_id && m.role === "player") || house.players.some((p) => p.user_id === r.user_id)) && (
                           room.members.some((m) => m.user_id === r.user_id && m.role === "player") ? <>
                             <button type="button" disabled={rolling} onClick={() => void startHouseReroll(r, "dread", "lower")} className="rounded bg-red-500/15 px-2 py-1 text-red-200 disabled:opacity-50">Dread ↓</button>
                             <button type="button" disabled={rolling} onClick={() => void startHouseReroll(r, "dread", "higher")} className="rounded bg-red-500/15 px-2 py-1 text-red-200 disabled:opacity-50">Dread ↑</button>

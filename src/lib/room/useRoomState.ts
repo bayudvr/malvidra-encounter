@@ -59,6 +59,8 @@ const EMPTY: State = {
 };
 
 type RoomStateOpts = {
+  /** Force projector clients to remain read-only, even for an authenticated DM. */
+  readOnly?: boolean;
   /**
    * Supabase client to use instead of the default authed browser client —
    * e.g. the header-authed cast client for the public `/cast/<token>` screen.
@@ -91,6 +93,10 @@ export function useRoomState(
   const [state, setState] = useState<State>(EMPTY);
   const [previewSceneId, setPreviewSceneId] = useState<string | null>(null);
   const [kicked, setKicked] = useState(false);
+  // Membership changes take effect without reloading the page. While loading,
+  // non-DMs start read-only rather than trusting a stale server-rendered role.
+  const currentRole: Role = opts?.readOnly ? "spectator" : role === "dm" ? "dm"
+    : state.members.find((m) => m.user_id === userId)?.role ?? "spectator";
 
   // The scene everyone sees is room.active_scene_id. The DM may preview another.
   const activeSceneId =
@@ -630,7 +636,7 @@ export function useRoomState(
     ...state,
     supabase,
     userId,
-    role,
+    role: currentRole,
     kicked,
     activeScene,
     activeSceneId,
