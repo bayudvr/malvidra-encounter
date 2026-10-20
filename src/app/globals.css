@@ -39,3 +39,20 @@ body {
 #mv-dice-overlay canvas.dice-box-canvas--hide {
   opacity: 0;
 }
+
+@keyframes initiative-turn-enter {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .initiative-turn-enter {
+    animation: initiative-turn-enter 180ms ease-out;
+  }
+}

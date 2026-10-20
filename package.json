@@ -7,7 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "db:push": "node scripts/db-push.mjs"
+    "db:push": "node scripts/db-push.mjs",
+    "test:action-requests": "node tests/action-requests.db.mjs",
+    "test:twist-dread": "node tests/twist-dread.db.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box": "^1.1.4",
@@ -24,6 +26,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

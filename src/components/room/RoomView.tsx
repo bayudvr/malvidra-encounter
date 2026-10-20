@@ -11,6 +11,8 @@ import type { Role } from "@/lib/room/types";
 import { useToast } from "@/components/toast";
 import { SceneList } from "@/components/room/SceneList";
 import { MemberPanel } from "@/components/room/MemberPanel";
+import { TwistDreadProvider } from "@/components/room/TwistDreadProvider";
+import { TwistDreadPanel } from "@/components/room/TwistDreadPanel";
 import { RoomCountersPanel } from "@/components/room/RoomCountersPanel";
 import { AssetPanel } from "@/components/room/AssetPanel";
 import { RoomWebhookPanel } from "@/components/room/RoomWebhookPanel";
@@ -23,7 +25,7 @@ import { EncounterBuilderPanel } from "@/components/room/EncounterBuilderPanel";
 import { NotesPanel } from "@/components/room/NotesPanel";
 import { InitiativeBar } from "@/components/initiative/InitiativeBar";
 import { InitiativeTracker } from "@/components/initiative/InitiativeTracker";
-import { DiceTray } from "@/components/dice/DiceTray";
+import { ActionRequests } from "@/components/room/ActionRequests";
 import { ChatBox } from "@/components/room/ChatBox";
 
 const SceneCanvas = dynamic(
@@ -70,8 +72,9 @@ export function RoomView({
     drawerState === "initiative" && !(inCombat && isDM) ? null : drawerState;
 
   return (
+    <TwistDreadProvider room={room}>
     <div className="flex h-dvh flex-col">
-      <DiceTray room={room} />
+      <ActionRequests room={room} />
       <ChatBox room={room} />
       <header className="relative flex items-center justify-between gap-2 border-b border-neutral-800 px-2 py-1.5 sm:px-4 sm:py-2">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
@@ -216,6 +219,7 @@ export function RoomView({
           {isDM && scene && <SceneSettings room={room} scene={scene} />}
           {isDM && <AssetPanel room={room} />}
           {isDM && <RoomWebhookPanel room={room} />}
+          <TwistDreadPanel room={room} />
           <RoomCountersPanel room={room} isDM={isDM} />
           <MemberPanel room={room} roomName={room.room?.name ?? roomName} />
         </aside>
@@ -260,6 +264,7 @@ export function RoomView({
         )}
       </div>
     </div>
+    </TwistDreadProvider>
   );
 }
 

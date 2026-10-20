@@ -56,6 +56,15 @@ export function InitiativeTracker({
     if (error) toast.error(error.message);
   }
 
+  async function giveTurn(id: string) {
+    if (!isDM || id === activeId) return;
+    const { error } = await room.supabase
+      .from("scenes")
+      .update({ active_combatant_id: id })
+      .eq("id", scene.id);
+    if (error) toast.error(error.message);
+  }
+
   async function remove(id: string) {
     const { error } = await room.supabase
       .from("combatants")
@@ -115,6 +124,7 @@ export function InitiativeTracker({
             isDM={isDM}
             onPatch={(p) => patch(c.id, p)}
             onRemove={() => remove(c.id)}
+            onActivate={() => void giveTurn(c.id)}
           />
         ))}
         {list.length === 0 && (
@@ -180,12 +190,14 @@ function CombatantRow({
   isDM,
   onPatch,
   onRemove,
+  onActivate,
 }: {
   combatant: Combatant;
   active: boolean;
   isDM: boolean;
   onPatch: (p: CombatantUpdate) => void;
   onRemove: () => void;
+  onActivate: () => void;
 }) {
   // Players only see the numbers of player characters — a monster's HP/AC
   // stays hidden from them.
@@ -202,12 +214,25 @@ function CombatantRow({
           className="h-2 w-2 shrink-0 rounded-full"
           style={{ background: colorFromString(c.name) }}
         />
-        <span className="flex-1 truncate">
-          {c.name}
-          {c.is_player && (
-            <span className="ml-1 text-[10px] text-sky-300">PC</span>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {isDM ? (
+            <button
+              type="button"
+              onClick={onActivate}
+              aria-label={`Give ${c.name} the turn`}
+              aria-pressed={active}
+              title="Give this combatant the turn"
+              className="min-h-8 min-w-0 flex-1 truncate rounded text-left font-medium hover:text-amber-300 focus-visible:outline-2 focus-visible:outline-amber-400"
+            >
+              {c.name}
+            </button>
+          ) : (
+            <span className="truncate">{c.name}</span>
           )}
-        </span>
+          {c.is_player && (
+            <span className="shrink-0 text-[10px] text-sky-300">PC</span>
+          )}
+        </div>
 
         {isDM ? (
           <input

@@ -1,239 +1,145 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import { colorFromString, initials } from "@/lib/utils";
 import { conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
-import type { Scene } from "@/lib/room/types";
+import type { Combatant, Scene, Token } from "@/lib/room/types";
 
-function hpColor(ratio: number) {
-  if (ratio > 0.5) return "#4ade80";
-  if (ratio > 0.25) return "#fbbf24";
-  return "#f87171";
-}
-
-/**
- * Foundry-style horizontal initiative strip floating over the top of the map.
- * Everyone sees the turn order; the DM can click any combatant to hand them the
- * turn (action-based initiative) and step the round.
- */
-export function InitiativeBar({
-  room,
-  scene,
-}: {
-  room: RoomStore;
-  scene: Scene;
-}) {
+/** A fixed-size turn carousel. Only the DM's picker contains the full roster. */
+export function InitiativeBar({ room, scene }: { room: RoomStore; scene: Scene }) {
   const toast = useToast();
   const isDM = room.role === "dm";
-  const list = room.combatants;
+  // The signed-in projector can use the DM's session, so also enforce its player perspective here.
+  const list = isDM ? room.combatants : room.combatants.filter((c) => !c.is_hidden);
   const activeId = scene.active_combatant_id;
-  const activeCombatant = list.find((c) => c.id === activeId) ?? null;
-  const isOwnTurn =
-    !isDM &&
-    !!activeCombatant &&
-    activeCombatant.is_player &&
-    activeCombatant.user_id === room.userId;
+  const activeIndex = list.findIndex((c) => c.id === activeId);
+  const activeCombatant = activeIndex < 0 ? null : list[activeIndex];
+  const isOwnTurn = !isDM && !!activeCombatant?.is_player && activeCombatant.user_id === room.userId;
+  const [busy, setBusy] = useState(false);
+  // These are neighbours in the roster, not a prediction of who takes the next turn.
+  // Keep the active portrait centred and never repeat a combatant in small parties.
+  const leftCount = Math.min(2, Math.floor((list.length - 1) / 2));
+  const rightCount = Math.min(2, list.length - 1 - leftCount);
+  const left = Array.from({ length: 2 }, (_, i) => {
+    const distance = 2 - i;
+    return activeIndex < 0 || distance > leftCount ? null
+      : list[(activeIndex - distance + list.length) % list.length];
+  });
+  const right = Array.from({ length: 2 }, (_, i) => {
+    const distance = i + 1;
+    return activeIndex < 0 || distance > rightCount ? null
+      : list[(activeIndex + distance) % list.length];
+  });
+  const tokenById = useMemo(() => new Map(room.tokens.map((t) => [t.id, t])), [room.tokens]);
 
-  const tokenById = useMemo(
-    () => new Map(room.tokens.map((t) => [t.id, t])),
-    [room.tokens],
-  );
-
-  async function updateScene(patch: {
-    active_combatant_id?: string | null;
-    round?: number;
-  }) {
-    const { error } = await room.supabase
-      .from("scenes")
-      .update(patch)
-      .eq("id", scene.id);
-    if (error) toast.error(error.message);
-  }
-
-  function setActive(id: string) {
-    if (!isDM || id === activeId) return;
-    updateScene({ active_combatant_id: id });
+  async function updateScene(patch: { active_combatant_id?: string | null; round?: number }) {
+    if (!isDM || busy) return;
+    setBusy(true);
+    try {
+      const { error } = await room.supabase.from("scenes").update(patch).eq("id", scene.id);
+      if (error) toast.error(error.message);
+    } finally { setBusy(false); }
   }
 
   function nextTurn() {
-    if (!isDM || list.length === 0) return;
-    const idx = list.findIndex((c) => c.id === activeId);
-    const nextIdx = idx < 0 ? 0 : (idx + 1) % list.length;
-    const wrapped = idx >= 0 && nextIdx === 0;
-    updateScene({
-      active_combatant_id: list[nextIdx].id,
-      round: wrapped ? scene.round + 1 : scene.round,
+    if (list.length === 0) return;
+    const nextIndex = activeIndex < 0 ? 0 : (activeIndex + 1) % list.length;
+    void updateScene({
+      active_combatant_id: list[nextIndex].id,
+      round: activeIndex >= 0 && nextIndex === 0 ? scene.round + 1 : scene.round,
     });
-  }
-
-  async function endOwnTurn() {
-    if (!isOwnTurn) return;
-    const { error } = await room.supabase.rpc("end_own_turn", {
-      p_scene: scene.id,
-    });
-    if (error) toast.error(error.message);
   }
 
   function nextRound() {
-    if (!isDM || list.length === 0) return;
-    const top = [...list].sort(
-      (a, b) =>
-        (b.initiative ?? -Infinity) - (a.initiative ?? -Infinity) ||
-        a.sort_order - b.sort_order,
+    if (list.length === 0) return;
+    const top = [...list].sort((a, b) =>
+      (b.initiative ?? -Infinity) - (a.initiative ?? -Infinity) || a.sort_order - b.sort_order,
     )[0];
-    updateScene({ active_combatant_id: top.id, round: scene.round + 1 });
+    void updateScene({ active_combatant_id: top.id, round: scene.round + 1 });
+  }
+
+  async function endOwnTurn() {
+    if (!isOwnTurn || busy) return;
+    setBusy(true);
+    try {
+      const { error } = await room.supabase.rpc("end_own_turn", { p_scene: scene.id });
+      if (error) toast.error(error.message);
+    } finally { setBusy(false); }
   }
 
   if (list.length === 0) return null;
 
   return (
-    <div className="pointer-events-auto absolute left-1/2 top-2 z-20 flex max-w-[calc(100%-1rem)] -translate-x-1/2 flex-col gap-1 rounded-xl border border-neutral-700 bg-neutral-900/90 p-1.5 shadow-xl backdrop-blur">
-      <div className="flex min-w-0 items-stretch gap-1.5">
-        <span className="flex items-center px-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
-          R{scene.round}
-        </span>
-
-        <ul className="flex min-w-0 items-stretch gap-1 overflow-x-auto">
-        {list.map((c) => {
-          const tok = c.token_id ? tokenById.get(c.token_id) : null;
-          const showStats = isDM || c.is_player;
-          const active = c.id === activeId;
-          const ratio =
-            c.max_hp && c.hp != null
-              ? Math.max(0, Math.min(1, c.hp / c.max_hp))
-              : null;
-          const downed =
-            !c.is_player && c.hp != null && c.hp <= 0;
-
-          return (
-            <li key={c.id}>
-              <button
-                type="button"
-                onClick={() => setActive(c.id)}
-                disabled={!isDM}
-                title={isDM ? "Give this combatant the turn" : c.name}
-                className={`flex w-16 flex-col items-center gap-0.5 rounded-lg border p-1 transition-colors ${
-                  active
-                    ? "border-amber-400 bg-amber-400/15"
-                    : "border-transparent hover:border-neutral-600"
-                } ${isDM ? "cursor-pointer" : "cursor-default"} ${
-                  downed ? "opacity-50 grayscale" : ""
-                }`}
-              >
-                <div
-                  className="relative h-10 w-10 overflow-hidden rounded-full border border-neutral-600"
-                  style={{
-                    background: tok?.image_url
-                      ? undefined
-                      : colorFromString(c.name),
-                  }}
-                >
-                  {tok?.image_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={tok.image_url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center text-[10px] font-bold text-neutral-950">
-                      {initials(c.name)}
-                    </span>
-                  )}
-                  {c.initiative != null && (
-                    <span className="absolute -bottom-0.5 -right-0.5 rounded bg-neutral-950 px-1 text-[10px] font-bold text-amber-300">
-                      {c.initiative}
-                    </span>
-                  )}
-                </div>
-
-                <span className="w-full truncate text-center text-[10px] text-neutral-300">
-                  {c.name}
-                </span>
-
-                {c.conditions.length > 0 && (
-                  <span className="flex flex-wrap justify-center gap-0.5">
-                    {c.conditions.map((cond, i) => (
-                      <span
-                        key={i}
-                        title={cond}
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ background: conditionColor(cond) }}
-                      />
-                    ))}
-                  </span>
-                )}
-
-                {showStats && ratio != null && (
-                  <span className="block h-1 w-full overflow-hidden rounded-full bg-neutral-700">
-                    <span
-                      className="block h-full rounded-full"
-                      style={{
-                        width: `${ratio * 100}%`,
-                        background: hpColor(ratio),
-                      }}
-                    />
-                  </span>
-                )}
-
-                {showStats && (c.hp != null || (c.temp_hp ?? 0) > 0) && (
-                  <span className="text-[9px] leading-none text-neutral-400">
-                    {c.hp ?? "?"}
-                    {(c.temp_hp ?? 0) > 0 ? `+${c.temp_hp}` : ""}
-                    {c.max_hp ? `/${c.max_hp}` : ""}
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-        {isDM && (
-          <div className="flex flex-col justify-center gap-1 pl-0.5">
-            <button
-              type="button"
-              onClick={nextTurn}
-              className="rounded bg-amber-500 px-2 py-1 text-[11px] font-semibold text-neutral-950 hover:bg-amber-400"
-            >
-              Next ▸
-            </button>
-            <button
-              type="button"
-              onClick={nextRound}
-              className="rounded bg-neutral-700 px-2 py-1 text-[11px] font-medium text-neutral-100 hover:bg-neutral-600"
-            >
-              ↻ Round
-            </button>
-          </div>
-        )}
+    <section aria-label="Initiative" className="pointer-events-auto absolute left-1/2 top-2 z-20 w-96 max-w-[calc(100%-1rem)] -translate-x-1/2 rounded-xl border border-neutral-700 bg-neutral-900/95 p-2 shadow-xl backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">Round {scene.round}</span>
+        {isDM ? (
+          <select aria-label="Give turn to combatant" value={activeCombatant?.id ?? ""} disabled={busy}
+            onChange={(e) => void updateScene({ active_combatant_id: e.target.value })}
+            className="min-w-0 max-w-40 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-200 disabled:opacity-50">
+            <option value="" disabled>Choose turn…</option>
+            {list.map((c) => <option key={c.id} value={c.id}>{c.name}{c.initiative !== null ? ` · ${c.initiative}` : ""}{c.is_hidden ? " (hidden)" : ""}</option>)}
+          </select>
+        ) : <span className="text-[10px] text-neutral-500">Initiative</span>}
       </div>
 
-      {activeCombatant && (
-        <div
-          className={`flex min-h-8 items-center justify-between gap-2 rounded-lg border px-2 py-1 text-[11px] ${
-            isOwnTurn
-              ? "border-amber-400/60 bg-amber-400/15 text-amber-200"
-              : "border-neutral-800 bg-neutral-950/70 text-neutral-400"
-          }`}
-        >
-          <span className="min-w-0 truncate font-semibold">
-            {isOwnTurn ? "⚔ Your Turn" : `Turn: ${activeCombatant.name}`}
-          </span>
-          {isOwnTurn && (
-            <button
-              type="button"
-              onClick={() => void endOwnTurn()}
-              className="shrink-0 rounded-md bg-amber-500 px-3 py-1 font-bold text-neutral-950 hover:bg-amber-400"
-            >
-              End Turn
-            </button>
-          )}
+      {activeCombatant ? (
+        <div role="group" aria-label="Combatant carousel" className="grid grid-cols-[1fr_1fr_1.5fr_1fr_1fr] items-center gap-1.5">
+          {left.map((c, i) => (
+            <RosterPortrait key={c?.id ?? `left-${i}`} combatant={c} token={c?.token_id ? tokenById.get(c.token_id) : undefined} />
+          ))}
+          <div key={activeCombatant.id} className="initiative-turn-enter flex min-w-0 flex-col items-center gap-1 rounded-xl border border-amber-400/50 bg-amber-400/10 px-1 py-2">
+            <p className="text-center text-[9px] font-semibold uppercase tracking-wide text-amber-300">{isOwnTurn ? "Your turn" : "Active"}</p>
+            <Portrait combatant={activeCombatant} token={activeCombatant.token_id ? tokenById.get(activeCombatant.token_id) : undefined} active />
+            <p title={activeCombatant.name} className="w-full truncate text-center text-xs font-semibold text-neutral-100">{activeCombatant.name}</p>
+            {activeCombatant.conditions.length > 0 && (
+              <div className="flex items-center justify-center gap-1" aria-label={`Conditions: ${activeCombatant.conditions.join(", ")}`}>
+                {activeCombatant.conditions.slice(0, 4).map((condition, i) => <span key={`${condition}-${i}`} title={condition} className="h-1.5 w-1.5 rounded-full" style={{ background: conditionColor(condition) }} />)}
+                {activeCombatant.conditions.length > 4 && <span className="text-[9px] text-neutral-400">+{activeCombatant.conditions.length - 4}</span>}
+              </div>
+            )}
+          </div>
+          {right.map((c, i) => (
+            <RosterPortrait key={c?.id ?? `right-${i}`} combatant={c} token={c?.token_id ? tokenById.get(c.token_id) : undefined} />
+          ))}
         </div>
-      )}
+      ) : <p className="py-3 text-center text-xs text-neutral-400">Waiting for the DM to choose a turn…</p>}
+
+      {/* Announce only the committed turn, rather than the entire roster on every render. */}
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {activeCombatant ? `Round ${scene.round}. ${activeCombatant.name}'s turn${isOwnTurn ? ". Your turn." : "."}` : "Waiting for a turn."}
+      </span>
+      {isDM ? <div className="mt-2 flex gap-1.5 border-t border-neutral-700/60 pt-2">
+        <button type="button" onClick={nextTurn} disabled={busy} className="min-h-8 flex-1 rounded-md bg-amber-500 px-2 py-1 text-xs font-semibold text-neutral-950 hover:bg-amber-400 disabled:opacity-50">Next ▸</button>
+        <button type="button" onClick={nextRound} disabled={busy} className="min-h-8 flex-1 rounded-md bg-neutral-700 px-2 py-1 text-xs font-medium text-neutral-100 hover:bg-neutral-600 disabled:opacity-50">↻ Round</button>
+      </div> : isOwnTurn && <button type="button" onClick={() => void endOwnTurn()} disabled={busy}
+        className="mt-2 min-h-9 w-full rounded-md bg-amber-500 px-3 py-1 text-xs font-bold text-neutral-950 hover:bg-amber-400 disabled:opacity-50">{busy ? "Ending turn…" : "End Turn"}</button>}
+    </section>
+  );
+}
+
+function RosterPortrait({ combatant, token }: { combatant: Combatant | null; token?: Token }) {
+  if (!combatant) return <div aria-hidden="true" />;
+  return (
+    <div title={combatant.name} className="flex min-w-0 flex-col items-center gap-1 opacity-60">
+      <Portrait combatant={combatant} token={token} />
+      <span className="w-full truncate text-center text-[10px] text-neutral-400">{combatant.name}</span>
+    </div>
+  );
+}
+
+function Portrait({ combatant, token, active = false }: { combatant: Combatant; token?: Token; active?: boolean }) {
+  const downed = !combatant.is_player && combatant.hp !== null && combatant.hp <= 0;
+  return (
+    <div aria-hidden="true" className={`shrink-0 overflow-hidden rounded-full border-2 ${active ? "h-14 w-14 border-amber-400" : "h-9 w-9 border-neutral-600"} ${downed ? "opacity-50 grayscale" : ""}`}
+      style={{ background: token?.image_url ? undefined : colorFromString(combatant.name) }}>
+      {token?.image_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={token.image_url} alt="" className="h-full w-full object-cover" />
+      ) : <span className={`flex h-full w-full items-center justify-center font-bold text-neutral-950 ${active ? "text-sm" : "text-[10px]"}`}>{initials(combatant.name)}</span>}
     </div>
   );
 }

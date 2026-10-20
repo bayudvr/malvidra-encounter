@@ -10,6 +10,16 @@ Initiative tracker + battle map for tabletop RPG encounters.
 - A scene runs in **exploration** or **combat** mode. Combat opens the **initiative tracker**.
 - Everything syncs in real time to every participant via Supabase Realtime.
 
+## DM action and roll requests
+
+DMs can send persistent action or d20-roll requests to a player. See
+[usage, migration, and verification](docs/action-requests.md).
+
+## Twist & Dread
+
+DMs can set up session quotas, track resources, distribute Twist from the pool,
+and apply Twist/Dread to public dice rolls. See [usage and rollout](docs/twist-dread.md).
+
 ## Stack
 
 Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · react-konva · Supabase (Postgres + Auth + Realtime).
@@ -95,6 +105,11 @@ The checked-in `src/lib/database.types.ts` is hand-written to match the migratio
 - No fog of war, dice roller, monster stat blocks, or chat yet.
 
 ## Deploy
+
+`vercel.json` disables automatic Git deployments for `dev`, so development pushes
+and PRs from that branch do not create Vercel previews. Production releases remain
+on `main`.
+
 
 Deploys to Vercel as-is. Set the three `NEXT_PUBLIC_*` env vars in the Vercel project and
 point `NEXT_PUBLIC_SITE_URL` at the deployed URL.

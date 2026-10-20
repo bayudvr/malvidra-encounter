@@ -1,3 +1,5 @@
+import type { HouseSession, HousePlayer, HouseEvent, HouseReroll } from "@/lib/twist-dread";
+
 // Hand-written to mirror supabase/migrations/0001_init.sql.
 // Regenerate with: npx supabase gen types typescript --project-id <id> > src/lib/database.types.ts
 
@@ -7,11 +9,36 @@ export type MemberRole = "dm" | "player";
 /** One die group in a roll, e.g. { sides: 6, values: [3, 5] }. */
 export type DiceDetail = { sides: number; values: number[] };
 
+export type ActionRequest = {
+  id: string;
+  room_id: string;
+  target_user_id: string;
+  prompt: string;
+  kind: "action" | "roll";
+  dc: number | null;
+  status: "pending" | "completed" | "cancelled";
+  dice_roll_id: string | null;
+  result_total: number | null;
+  result_notation: string | null;
+  created_at: string;
+  resolved_at: string | null;
+};
+
 type Timestamps = { created_at: string };
 
 export interface Database {
   public: {
     Tables: {
+      house_sessions: { Row: HouseSession; Insert: never; Update: never; Relationships: [] };
+      house_players: { Row: HousePlayer; Insert: never; Update: never; Relationships: [] };
+      house_events: { Row: HouseEvent; Insert: never; Update: never; Relationships: [] };
+      house_rerolls: { Row: HouseReroll; Insert: never; Update: never; Relationships: [] };
+      action_requests: {
+        Row: ActionRequest;
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       profiles: {
         Row: { id: string; display_name: string } & Timestamps;
         Insert: { id: string; display_name?: string; created_at?: string };
@@ -244,6 +271,7 @@ export interface Database {
       };
       dice_rolls: {
         Row: {
+          superseded_by: string | null;
           id: string;
           room_id: string;
           user_id: string | null;
@@ -567,6 +595,34 @@ export interface Database {
     };
     Views: Record<string, never>;
     Functions: {
+      setup_house_session: {
+        Args: { p_room: string; p_quota: number; p_players: string[]; p_operation: string };
+        Returns: HouseSession[];
+      };
+      apply_house_event: {
+        Args: { p_session: string; p_kind: string; p_operation: string; p_target?: string | null; p_amount?: number; p_roll?: string | null; p_mode?: string | null };
+        Returns: HouseEvent[];
+      };
+      submit_house_reroll: {
+        Args: { p_reroll: string; p_detail: DiceDetail[] };
+        Returns: HouseReroll[];
+      };
+      resolve_house_reroll: {
+        Args: { p_reroll: string; p_choice: string };
+        Returns: HouseReroll[];
+      };
+      create_action_request: {
+        Args: { p_room: string; p_target: string; p_prompt: string; p_kind: string; p_dc?: number | null };
+        Returns: ActionRequest[];
+      };
+      complete_action_request: {
+        Args: { p_request: string; p_values?: number[] | null; p_modifier?: number; p_mode?: string };
+        Returns: ActionRequest[];
+      };
+      cancel_action_request: {
+        Args: { p_request: string };
+        Returns: ActionRequest[];
+      };
       join_room: { Args: { p_code: string }; Returns: string };
       seed_scene_combatants: { Args: { p_scene: string }; Returns: undefined };
       spawn_asset_token: {
