@@ -25,6 +25,9 @@ and apply Twist/Dread to public dice rolls. See [usage and rollout](docs/twist-d
 
 ## Stack
 
+DMs can organize the token library into room-specific folders. See
+[token folders](docs/token-folders.md) for usage, database setup, and validation.
+
 Next.js 16 (App Router) · TypeScript · Tailwind CSS v4 · react-konva · Supabase (Postgres + Auth + Realtime).
 
 ## Setup

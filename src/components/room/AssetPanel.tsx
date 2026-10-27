@@ -5,14 +5,24 @@ import { useState } from "react";
 import { Button, Input, Label, Modal, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import { ImageUploadButton } from "@/components/room/ImageUploadButton";
+import { TokenFolderManager } from "@/components/room/TokenFolderManager";
 import type { RoomStore } from "@/lib/room/useRoomState";
-import type { Asset } from "@/lib/room/types";
+import type { Asset, AssetFolder } from "@/lib/room/types";
 import { colorFromString, tokenInitials } from "@/lib/utils";
 
 export function AssetPanel({ room }: { room: RoomStore }) {
   const toast = useToast();
   const [showCreate, setShowCreate] = useState(false);
+  const [folderFilter, setFolderFilter] = useState("all");
+  const [search, setSearch] = useState("");
   const scene = room.activeScene;
+  const folders = room.assetFolders ?? [];
+  const selectedFolder = folderFilter === "all" || folderFilter === "unfiled" || folders.some((folder) => folder.id === folderFilter)
+    ? folderFilter : "unfiled";
+  const visibleAssets = room.assets.filter((asset) =>
+    (selectedFolder === "all" || (selectedFolder === "unfiled" ? !asset.folder_id : asset.folder_id === selectedFolder)) &&
+    asset.name.toLowerCase().includes(search.trim().toLowerCase()),
+  );
 
   async function createAsset(values: {
     name: string;
@@ -20,6 +30,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     hp: number;
     ac: number;
     carryState: boolean;
+    folderId: string | null;
   }) {
     if (!room.room) return;
     const { error } = await room.supabase.from("assets").insert({
@@ -29,6 +40,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
       hp: values.hp,
       ac: values.ac,
       carry_state: values.carryState,
+      ...(values.folderId ? { folder_id: values.folderId } : {}),
     });
     if (error) return toast.error(error.message);
     setShowCreate(false);
@@ -126,17 +138,34 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     else room.reload();
   }
 
+  async function moveAsset(id: string, folderId: string | null) {
+    const { error } = await room.supabase.from("assets").update({ folder_id: folderId }).eq("id", id);
+    if (error) toast.error("Could not move token. Try reloading the library.");
+    await room.reload();
+  }
+
   const players = room.members.filter((m) => m.role === "player");
 
   return (
     <Panel title="Token library">
+      <TokenFolderManager room={room} selected={selectedFolder} onSelect={setFolderFilter} />
+      <Input
+        aria-label="Search tokens"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        placeholder="Search tokens…"
+        className="mb-2"
+      />
       <ul className="space-y-1">
-        {room.assets.map((a) => (
+        {visibleAssets.map((a) => (
           <AssetRow
             key={a.id}
             asset={a}
             canDrop={!!scene}
             players={players}
+            folders={folders}
+            foldersDisabled={!!room.assetFoldersError || room.loading}
+            onFolderChange={(folderId) => moveAsset(a.id, folderId)}
             onRename={(newName) => renameAsset(a.id, newName)}
             onImageChange={(newUrl) => updateAssetImage(a.id, newUrl)}
             onStatsChange={(hp, ac) => updateAssetStats(a.id, hp, ac)}
@@ -146,9 +175,9 @@ export function AssetPanel({ room }: { room: RoomStore }) {
             onDelete={() => deleteAsset(a.id)}
           />
         ))}
-        {room.assets.length === 0 && (
+        {visibleAssets.length === 0 && (
           <li className="px-1 py-1 text-xs text-neutral-500">
-            No tokens yet. Add one below.
+            {room.assets.length === 0 ? "No tokens yet. Add one below." : search.trim() ? "No matching tokens." : "This folder is empty."}
           </li>
         )}
       </ul>
@@ -166,6 +195,9 @@ export function AssetPanel({ room }: { room: RoomStore }) {
       {showCreate && room.room && (
         <CreateAssetModal
           roomId={room.room.id}
+          folders={folders}
+          foldersDisabled={!!room.assetFoldersError}
+          initialFolderId={selectedFolder === "all" || selectedFolder === "unfiled" ? null : selectedFolder}
           onClose={() => setShowCreate(false)}
           onCreate={createAsset}
         />
@@ -176,10 +208,16 @@ export function AssetPanel({ room }: { room: RoomStore }) {
 
 function CreateAssetModal({
   roomId,
+  folders,
+  foldersDisabled,
+  initialFolderId,
   onClose,
   onCreate,
 }: {
   roomId: string;
+  folders: AssetFolder[];
+  foldersDisabled: boolean;
+  initialFolderId: string | null;
   onClose: () => void;
   onCreate: (values: {
     name: string;
@@ -187,11 +225,13 @@ function CreateAssetModal({
     hp: number;
     ac: number;
     carryState: boolean;
+    folderId: string | null;
   }) => void;
 }) {
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [folderId, setFolderId] = useState(initialFolderId);
   // Default 1, not blank — a value to overwrite beats an empty field, and it
   // means a token dropped without a second thought still has *something* on
   // its combatant sheet when combat starts, instead of null HP/AC.
@@ -202,12 +242,21 @@ function CreateAssetModal({
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim() || uploading) return;
-    onCreate({ name, imageUrl, hp, ac, carryState });
+    onCreate({ name, imageUrl, hp, ac, carryState, folderId });
   }
 
   return (
     <Modal title="New token" onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
+        <div>
+          <Label htmlFor="newTokenFolder">Folder</Label>
+          <select id="newTokenFolder" value={folderId ?? ""} disabled={foldersDisabled}
+            onChange={(event) => setFolderId(event.target.value || null)}
+            className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm">
+            <option value="">Unfiled</option>
+            {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+          </select>
+        </div>
         <div>
           <Label>Name</Label>
           <Input
@@ -273,6 +322,9 @@ function CreateAssetModal({
 
 function AssetRow({
   asset,
+  folders,
+  foldersDisabled,
+  onFolderChange,
   canDrop,
   players,
   onRename,
@@ -284,6 +336,9 @@ function AssetRow({
   onDelete,
 }: {
   asset: Asset;
+  folders: AssetFolder[];
+  foldersDisabled: boolean;
+  onFolderChange: (id: string | null) => Promise<void>;
   canDrop: boolean;
   players: RoomStore["members"];
   onRename: (name: string) => void;
@@ -381,6 +436,16 @@ function AssetRow({
           }}
         />
       </div>
+      <select
+        aria-label={`Folder for ${asset.name}`}
+        value={asset.folder_id ?? ""}
+        disabled={foldersDisabled}
+        onChange={(event) => onFolderChange(event.target.value || null)}
+        className="ml-9 w-[calc(100%-2.25rem)] rounded border border-neutral-800 bg-neutral-950 px-1 py-1 text-xs text-neutral-400 disabled:opacity-50"
+      >
+        <option value="">Unfiled</option>
+        {folders.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+      </select>
       <div className="ml-9 flex w-[calc(100%-2.25rem)] items-center gap-3 text-xs text-neutral-400">
         <label className="flex items-center gap-1">
           HP

@@ -41,6 +41,7 @@ const uiImports = {
     Panel: ({ children }) => React.createElement("section", null, children),
     Button: ({ children, disabled, type }) => React.createElement("button", { disabled, type }, children),
     Input: (props) => React.createElement("input", props),
+    Label: (props) => React.createElement("label", props),
   },
   "@/components/toast": { useToast: () => ({ error() {} }) },
   "@/components/room/ImageUploadButton": {
@@ -48,6 +49,9 @@ const uiImports = {
       assert.ok(roomId, "Upload must have a loaded room ID");
       return React.createElement("button", { "data-upload-room": roomId }, "Upload to Imgur");
     },
+  },
+  "@/components/room/TokenFolderManager": {
+    TokenFolderManager: () => null,
   },
   "@/lib/utils": {},
 };
@@ -73,6 +77,28 @@ test("new-token control stays disabled until its room is loaded", () => {
     room: { ...room, room: { id: roomId } },
   }));
   assert.ok(!ready.includes("disabled"));
+});
+
+test("folder controls handle loading, saved folders, and a pending database update", () => {
+  const { TokenFolderManager } = loadModule("../src/components/room/TokenFolderManager.tsx", uiImports);
+  const room = { room: null, assets: [], assetFolders: [], loading: true };
+  const render = (state) => renderToStaticMarkup(React.createElement(TokenFolderManager, {
+    room: state, selected: "all", onSelect() {},
+  }));
+  assert.match(render(room), /\sdisabled=""/);
+  const ready = {
+    ...room, room: { id: roomId }, loading: false,
+    assetFolders: [{ id: "party", room_id: roomId, name: "Party" }],
+    assets: [{ folder_id: "party" }, { folder_id: null }],
+  };
+  const html = render(ready);
+  assert.ok(html.includes("All tokens (2)"));
+  assert.ok(html.includes("Unfiled (1)"));
+  assert.ok(html.includes("Party (1)"));
+  assert.doesNotMatch(html, /\sdisabled=""/);
+  const pending = render({ ...ready, assetFoldersError: "Database update pending" });
+  assert.ok(pending.includes("Database update pending"));
+  assert.match(pending, /\sdisabled=""/);
 });
 
 function setup({ role = "dm", user = { id: "dm-user" }, configured = true,

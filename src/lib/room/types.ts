@@ -4,6 +4,7 @@ export type Room = Tables<"rooms">;
 export type Scene = Tables<"scenes">;
 export type Token = Tables<"tokens">;
 export type Asset = Tables<"assets">;
+export type AssetFolder = Tables<"asset_folders">;
 export type Combatant = Tables<"combatants">;
 export type RoomWebhook = Tables<"room_webhooks">;
 export type FogPolygon = Tables<"fog_polygons">;

@@ -7,6 +7,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import type {
   Asset,
+  AssetFolder,
   ChatMessage,
   Combatant,
   FogPolygon,
@@ -31,6 +32,8 @@ type State = {
   scenes: Scene[];
   members: Member[];
   assets: Asset[];
+  assetFolders: AssetFolder[];
+  assetFoldersError: string | null;
   tokens: Token[];
   combatants: Combatant[];
   fogPolygons: FogPolygon[];
@@ -47,6 +50,8 @@ const EMPTY: State = {
   scenes: [],
   members: [],
   assets: [],
+  assetFolders: [],
+  assetFoldersError: null,
   tokens: [],
   combatants: [],
   fogPolygons: [],
@@ -111,7 +116,7 @@ export function useRoomState(
   }, [activeSceneId]);
 
   const loadRoomBits = useCallback(async () => {
-    const [rooms, scenes, members, assets, chatMessages] = await Promise.all([
+    const [rooms, scenes, members, assets, chatMessages, folders] = await Promise.all([
       supabase.from("rooms").select("*").eq("id", roomId).single(),
       supabase
         .from("scenes")
@@ -134,6 +139,9 @@ export function useRoomState(
         .eq("room_id", roomId)
         .order("created_at", { ascending: false })
         .limit(CHAT_MESSAGE_LIMIT),
+      role === "dm" && !opts?.readOnly
+        ? supabase.from("asset_folders").select("*").eq("room_id", roomId).order("name")
+        : Promise.resolve({ data: [] as AssetFolder[], error: null }),
     ]);
 
     const userIds = (members.data ?? []).map((m) => m.user_id);
@@ -152,6 +160,8 @@ export function useRoomState(
       room: rooms.data ?? prev.room,
       scenes: scenes.data ?? [],
       assets: assets.data ?? [],
+      assetFolders: folders.data ?? [],
+      assetFoldersError: folders.error ? "Folders are unavailable. The database update may be pending; try reloading." : null,
       members: (members.data ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
@@ -163,7 +173,7 @@ export function useRoomState(
       chatMessages: (chatMessages.data ?? []).slice().reverse(),
       loading: false,
     }));
-  }, [roomId, supabase]);
+  }, [roomId, supabase, role, opts?.readOnly]);
 
   const loadSceneBits = useCallback(
     async (sceneId: string | null) => {
@@ -247,6 +257,7 @@ export function useRoomState(
       // profiles isn't in the realtime publication, so a rename is announced over broadcast
       // instead — receivers just reload members to pick up the new display_name.
       .on("broadcast", { event: "members-changed" }, () => loadRoomBits())
+      .on("broadcast", { event: "asset-folders-changed" }, () => loadRoomBits())
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` },
@@ -632,6 +643,10 @@ export function useRoomState(
     roomChannelRef.current?.send({ type: "broadcast", event: "members-changed", payload: {} });
   }, []);
 
+  const notifyAssetFoldersChanged = useCallback(() => {
+    roomChannelRef.current?.send({ type: "broadcast", event: "asset-folders-changed", payload: {} });
+  }, []);
+
   return {
     ...state,
     supabase,
@@ -656,6 +671,7 @@ export function useRoomState(
     addDrawingLocal,
     removeDrawingsLocal,
     notifyMembersChanged,
+    notifyAssetFoldersChanged,
   };
 }
 

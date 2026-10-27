@@ -90,6 +90,12 @@ export interface Database {
         Update: { role?: MemberRole };
         Relationships: [];
       };
+      asset_folders: {
+        Row: { id: string; room_id: string; name: string } & Timestamps;
+        Insert: { id?: string; room_id: string; name: string; created_at?: string };
+        Update: { name?: string };
+        Relationships: [];
+      };
       assets: {
         Row: {
           id: string;
@@ -100,6 +106,7 @@ export interface Database {
           ac: number;
           owner_user_id: string | null;
           carry_state: boolean;
+          folder_id: string | null;
         } & Timestamps;
         Insert: {
           id?: string;
@@ -110,6 +117,7 @@ export interface Database {
           ac?: number;
           owner_user_id?: string | null;
           carry_state?: boolean;
+          folder_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -119,6 +127,7 @@ export interface Database {
           ac?: number;
           owner_user_id?: string | null;
           carry_state?: boolean;
+          folder_id?: string | null;
         };
         Relationships: [];
       };

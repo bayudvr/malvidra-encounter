@@ -11,7 +11,8 @@
     "test:action-requests": "node tests/action-requests.db.mjs",
     "test:twist-dread": "node tests/twist-dread.db.mjs",
     "test:spectators": "node tests/spectators.db.mjs",
-    "test:image-upload": "node --test tests/image-upload.mjs"
+    "test:image-upload": "node --test tests/image-upload.mjs",
+    "test:asset-folders": "node tests/asset-folders.db.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box": "^1.1.4",
