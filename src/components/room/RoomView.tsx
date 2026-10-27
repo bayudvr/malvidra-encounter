@@ -217,7 +217,7 @@ export function RoomView({
             </button>
           </div>
           {isDM && <SceneList room={room} />}
-          {isDM && scene && <SceneSettings room={room} scene={scene} />}
+          {isDM && scene && <SceneSettings key={scene.id} room={room} scene={scene} />}
           {isDM && <AssetPanel room={room} />}
           {isDM && <RoomWebhookPanel room={room} />}
           <TwistDreadPanel room={room} />

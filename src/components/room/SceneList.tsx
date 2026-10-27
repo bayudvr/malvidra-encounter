@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button, Input, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
+import { ImageUploadButton } from "@/components/room/ImageUploadButton";
 import type { RoomStore } from "@/lib/room/useRoomState";
 
 export function SceneList({ room }: { room: RoomStore }) {
@@ -12,10 +13,11 @@ export function SceneList({ room }: { room: RoomStore }) {
   const [name, setName] = useState("");
   const [mapUrl, setMapUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   async function addScene(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!room.room || !name.trim() || busy || uploading) return;
     setBusy(true);
     try {
       const { data, error } = await room.supabase
@@ -126,7 +128,7 @@ export function SceneList({ room }: { room: RoomStore }) {
         )}
       </ul>
 
-      {isDM && (
+      {isDM && room.room && (
         <form onSubmit={addScene} className="mt-3 space-y-2 border-t border-neutral-800 pt-3">
           <Input
             value={name}
@@ -135,10 +137,17 @@ export function SceneList({ room }: { room: RoomStore }) {
           />
           <Input
             value={mapUrl}
+            disabled={busy || uploading}
             onChange={(e) => setMapUrl(e.target.value)}
             placeholder="Map image URL (optional)"
           />
-          <Button type="submit" size="sm" disabled={busy} className="w-full">
+          <ImageUploadButton
+            roomId={room.room.id}
+            disabled={busy}
+            onBusyChange={setUploading}
+            onUploaded={setMapUrl}
+          />
+          <Button type="submit" size="sm" disabled={busy || uploading} className="w-full">
             Add scene
           </Button>
         </form>

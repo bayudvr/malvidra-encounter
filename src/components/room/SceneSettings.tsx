@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button, Input, Label, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
+import { ImageUploadButton } from "@/components/room/ImageUploadButton";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Scene, SceneUpdate } from "@/lib/room/types";
 
@@ -17,6 +18,7 @@ export function SceneSettings({
   const toast = useToast();
   const [name, setName] = useState(scene.name);
   const [mapUrl, setMapUrl] = useState(scene.map_url ?? "");
+  const [uploading, setUploading] = useState(false);
   const [gridSize, setGridSize] = useState(String(scene.grid_size));
   const [feet, setFeet] = useState(String(scene.feet_per_square));
   const [spotlightNote, setSpotlightNote] = useState(scene.spotlight_note ?? "");
@@ -42,6 +44,7 @@ export function SceneSettings({
       .update(patch)
       .eq("id", scene.id);
     if (error) toast.error(error.message);
+    return !error;
   }
 
   return (
@@ -73,6 +76,7 @@ export function SceneSettings({
           <div className="flex gap-1">
             <Input
               id="mapUrl"
+              disabled={uploading}
               value={mapUrl}
               onChange={(e) => setMapUrl(e.target.value)}
               placeholder="https://…"
@@ -80,9 +84,23 @@ export function SceneSettings({
             <Button
               size="sm"
               onClick={() => update({ map_url: mapUrl.trim() || null })}
+              disabled={uploading}
             >
               Set
             </Button>
+          </div>
+          <div className="mt-2">
+            <ImageUploadButton
+              key={scene.id}
+              roomId={scene.room_id}
+              onBusyChange={setUploading}
+              onUploaded={async (url) => {
+                if (!await update({ map_url: url })) {
+                  throw new Error("Image uploaded, but the map could not be saved. Try again.");
+                }
+                setMapUrl(url);
+              }}
+            />
           </div>
         </div>
 

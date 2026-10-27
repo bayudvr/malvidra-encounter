@@ -68,6 +68,19 @@ npm run dev
 
 Open <http://localhost:3000>.
 
+### Scene and token image uploads
+
+Set `IMGUR_CLIENT_ID` in `.env.local` to enable anonymous Imgur uploads for DMs.
+On Vercel, set the same server-only variable in the deployment's environment.
+DMs can use **Upload to Imgur** when creating a scene or library token, or when
+replacing an existing scene map or library token image. JPG, PNG, WebP and GIF
+files up to 4 MB are supported. Wait for the upload before adding a new scene or
+token; existing images are saved automatically. Replacing a library token image
+also updates tokens already placed from it. Manual image URLs remain available.
+Only image URLs are stored in the database; image files are hosted by Imgur.
+Removing a scene or token does not delete its image from Imgur. Imgur's hosting
+[terms](https://imgur.com/tos) apply, including its restrictions on CDN usage.
+
 ## Trying it end-to-end
 
 1. Open the app in two browsers (or one normal + one incognito). Sign up a **DM** account

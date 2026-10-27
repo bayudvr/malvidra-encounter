@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button, Input, Label, Modal, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
+import { ImageUploadButton } from "@/components/room/ImageUploadButton";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Asset } from "@/lib/room/types";
 import { colorFromString, tokenInitials } from "@/lib/utils";
@@ -20,6 +21,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     ac: number;
     carryState: boolean;
   }) {
+    if (!room.room) return;
     const { error } = await room.supabase.from("assets").insert({
       room_id: room.room!.id,
       name: values.name.trim(),
@@ -60,7 +62,10 @@ export function AssetPanel({ room }: { room: RoomStore }) {
       .from("assets")
       .update({ image_url: trimmed })
       .eq("id", id);
-    if (error) return toast.error(error.message);
+    if (error) {
+      toast.error(error.message);
+      return false;
+    }
     const { error: tokenError } = await room.supabase
       .from("tokens")
       .update({ image_url: trimmed })
@@ -68,6 +73,7 @@ export function AssetPanel({ room }: { room: RoomStore }) {
     if (tokenError) toast.error(tokenError.message);
     room.reload();
     room.reloadScene();
+    return true;
   }
 
   // The server snapshots the newest cross-scene state in ONE transaction:
@@ -151,13 +157,15 @@ export function AssetPanel({ room }: { room: RoomStore }) {
         size="sm"
         variant="secondary"
         className="mt-3 w-full"
+        disabled={!room.room}
         onClick={() => setShowCreate(true)}
       >
         + New token
       </Button>
 
-      {showCreate && (
+      {showCreate && room.room && (
         <CreateAssetModal
+          roomId={room.room.id}
           onClose={() => setShowCreate(false)}
           onCreate={createAsset}
         />
@@ -167,9 +175,11 @@ export function AssetPanel({ room }: { room: RoomStore }) {
 }
 
 function CreateAssetModal({
+  roomId,
   onClose,
   onCreate,
 }: {
+  roomId: string;
   onClose: () => void;
   onCreate: (values: {
     name: string;
@@ -181,6 +191,7 @@ function CreateAssetModal({
 }) {
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
   // Default 1, not blank — a value to overwrite beats an empty field, and it
   // means a token dropped without a second thought still has *something* on
   // its combatant sheet when combat starts, instead of null HP/AC.
@@ -190,7 +201,7 @@ function CreateAssetModal({
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!name.trim() || uploading) return;
     onCreate({ name, imageUrl, hp, ac, carryState });
   }
 
@@ -210,9 +221,17 @@ function CreateAssetModal({
           <Label>Image URL (optional)</Label>
           <Input
             value={imageUrl}
+            disabled={uploading}
             onChange={(e) => setImageUrl(e.target.value)}
             placeholder="https://…"
           />
+          <div className="mt-2">
+            <ImageUploadButton
+              roomId={roomId}
+              onBusyChange={setUploading}
+              onUploaded={setImageUrl}
+            />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -244,7 +263,7 @@ function CreateAssetModal({
           New tokens use these starting stats unless continuity is enabled.
           Turn it on for persistent characters and off for repeatable monsters.
         </p>
-        <Button type="submit" size="sm" className="w-full">
+        <Button type="submit" size="sm" className="w-full" disabled={uploading}>
           Add to library
         </Button>
       </form>
@@ -268,7 +287,7 @@ function AssetRow({
   canDrop: boolean;
   players: RoomStore["members"];
   onRename: (name: string) => void;
-  onImageChange: (url: string) => void;
+  onImageChange: (url: string) => Promise<boolean>;
   onStatsChange: (hp: number, ac: number) => void;
   onOwnerChange: (ownerUserId: string | null) => void;
   onCarryStateChange: (enabled: boolean) => void;
@@ -277,6 +296,7 @@ function AssetRow({
 }) {
   const [name, setName] = useState(asset.name);
   const [imageUrl, setImageUrl] = useState(asset.image_url ?? "");
+  const [uploading, setUploading] = useState(false);
   const [hp, setHp] = useState(asset.hp);
   const [ac, setAc] = useState(asset.ac);
 
@@ -343,11 +363,24 @@ function AssetRow({
       </div>
       <input
         value={imageUrl}
+        disabled={uploading}
         onChange={(e) => setImageUrl(e.target.value)}
         onBlur={() => imageUrl !== (asset.image_url ?? "") && onImageChange(imageUrl)}
         placeholder="Image URL (optional)"
         className="ml-9 w-[calc(100%-2.25rem)] truncate rounded bg-transparent px-1 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 focus:bg-neutral-800 focus:text-neutral-200 focus:outline-none"
       />
+      <div className="ml-9">
+        <ImageUploadButton
+          roomId={asset.room_id}
+          onBusyChange={setUploading}
+          onUploaded={async (url) => {
+            if (!await onImageChange(url)) {
+              throw new Error("Image uploaded, but the token could not be saved. Try again.");
+            }
+            setImageUrl(url);
+          }}
+        />
+      </div>
       <div className="ml-9 flex w-[calc(100%-2.25rem)] items-center gap-3 text-xs text-neutral-400">
         <label className="flex items-center gap-1">
           HP
