@@ -2322,6 +2322,74 @@ export function SceneCanvas({
     return targets;
   }, [pings, remoteLasers]);
 
+  // Desktop map shortcuts. Never intercept editing, browser/system shortcuts
+  // or key presses from a modal/form. L is the existing hold-to-laser tool.
+  useEffect(() => {
+    if (readOnly) return;
+    function onShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target && (target.closest("input, textarea, select, [contenteditable], [role=dialog]"))) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      const key = event.key.toLowerCase();
+      if (key === "?") {
+        event.preventDefault();
+        setShowShortcuts((old) => !old);
+        return;
+      }
+      if (key === "escape") {
+        setShowShortcuts(false);
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false);
+        setSelectMode(false); setFogMenu(false); setMeasureMenu(false);
+        clearTargetLock();
+        return;
+      }
+      if (aoeMode && ["1","2","3","4"].includes(key)) {
+        event.preventDefault();
+        setAoeMode((["cone","line","cube","circle"] as const)[Number(key)-1]);
+        return;
+      }
+      if (!["v","m","a","t","d","f"].includes(key)) return;
+      if (key === "v" && !isDM) return;
+      if (key === "f" && (!isDM || !scene.fog_enabled)) return;
+      event.preventDefault();
+      if (key === "t") {
+        if (targetMode || localTargetLock) clearTargetLock();
+        else beginTargetMode();
+        return;
+      }
+      if (key === "v") {
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false);
+        setSelectMode((v) => !v);
+      } else if (key === "m") {
+        const next = !measuring;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        setMeasuring(next);
+      } else if (key === "a") {
+        const next = !aoeMode;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        if (next) setAoeMode("circle");
+      } else if (key === "d") {
+        const next = !drawMode;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        if (next) setDrawMode("pen");
+      } else if (key === "f") {
+        const next = !drawingPolygon;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        if (next) { setPolygonPoints([]); setDrawingPolygon(true); }
+      }
+    }
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+    // The handler must follow the current active tool modes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, isDM, scene.fog_enabled, measuring, aoeMode, drawMode, drawingPolygon, targetMode, localTargetLock]);
+
   return (
     <div
       ref={wrapRef}
@@ -2345,6 +2413,21 @@ export function SceneCanvas({
         </button>
       )}
       {forceFollow && <div className="pointer-events-none absolute left-2 top-2 z-[35] rounded border border-amber-600/60 bg-neutral-950/90 px-3 py-2 text-xs text-amber-300">🔒 Camera follows DM</div>}
+      {!readOnly && <button type="button" onClick={() => setShowShortcuts((v) => !v)}
+        aria-expanded={showShortcuts} aria-label="Show keyboard shortcuts"
+        className={`absolute left-2 top-14 z-[35] rounded border px-2 py-1 text-xs ${showShortcuts ? "border-amber-500 bg-amber-500/20 text-amber-200" : "border-neutral-700 bg-neutral-950/90 text-neutral-300"}`}>⌨ Shortcuts (?)</button>}
+      {showShortcuts && !readOnly && (
+        <div className="absolute left-2 top-24 z-[40] max-w-[min(90vw,22rem)] rounded-xl border border-neutral-700 bg-neutral-950/95 p-3 text-xs text-neutral-200 shadow-2xl" role="dialog" aria-label="Keyboard shortcuts">
+          <div className="mb-2 flex items-center justify-between gap-3"><strong>Map shortcuts</strong><button type="button" onClick={() => setShowShortcuts(false)} aria-label="Close keyboard shortcuts">✕</button></div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {[
+              ["V","Select (DM)"],["M","Measure"],["A","AOE circle"],["1–4","AOE shapes"],
+              ["T","Target"],["D","Draw"],["F","Fog (DM)"],["L hold","Laser"],["Esc","Clear tools"],["?","Toggle help"],
+            ].map(([key,label]) => <div key={key}><kbd className="rounded bg-neutral-800 px-1.5 py-0.5 text-amber-300">{key}</kbd> {label}</div>)}
+          </div>
+          <p className="mt-3 text-neutral-500">Shortcuts pause while you type in a field.</p>
+        </div>
+      )}
       <Stage
         ref={stageRef}
         width={size.w}
