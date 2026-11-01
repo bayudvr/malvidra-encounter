@@ -395,6 +395,8 @@ export function SceneCanvas({
   const stageRef = useRef<Konva.Stage>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ scale: 0.6, x: 40, y: 40 });
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const forceFollow = !isDM && !castMode && !!room.room?.force_view_sync;
   // Token selection is a set — one token shows the inspector, several show the
   // bulk-action bar and drag/hide together. DM only.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -668,7 +670,11 @@ export function SceneCanvas({
   // verbatim. Ephemeral broadcast (no DB writes) on a per-room channel.
   const castChannelRef = useRef<RealtimeChannel | null>(null);
   const viewRef = useRef(view);
+  const sizeRef = useRef(size);
+  const followRef = useRef(forceFollow);
   const sceneIdRef = useRef(scene.id);
+  useEffect(() => { followRef.current = forceFollow; }, [forceFollow]);
+  useEffect(() => { sizeRef.current = size; }, [size]);
   useEffect(() => {
     viewRef.current = view;
   }, [view]);
@@ -676,62 +682,76 @@ export function SceneCanvas({
     sceneIdRef.current = scene.id;
   }, [scene.id]);
 
+  // Broadcast the DM's map centre to cast screens and force-follow players.
+  // A persisted room flag (DM-write RLS) authorizes player camera following.
   useEffect(() => {
-    if (!isDM && !castMode) return;
-    const supabase = room.supabase;
-    const channel = supabase.channel(`cast:${scene.room_id}`, {
+    const channel = room.supabase.channel(`cast:${scene.room_id}`, {
       config: { broadcast: { self: false } },
     });
     castChannelRef.current = channel;
-
-    if (castMode) {
-      channel.on("broadcast", { event: "view" }, ({ payload }) => {
-        const p = payload as {
-          sceneId: string;
-          scale: number;
-          x: number;
-          y: number;
-        };
-        if (p.sceneId !== sceneIdRef.current) return;
+    channel.on("broadcast", { event: "view" }, ({ payload }) => {
+      if (isDM || (!castMode && !followRef.current)) return;
+      const p = payload as { sceneId?: string; scale?: number; x?: number; y?: number; centerX?: number; centerY?: number };
+      if (p.sceneId !== sceneIdRef.current || typeof p.scale !== "number" || !Number.isFinite(p.scale)) return;
+      if (p.scale < MIN_SCALE || p.scale > MAX_SCALE) return;
+      if (typeof p.centerX === "number" && Number.isFinite(p.centerX) && typeof p.centerY === "number" && Number.isFinite(p.centerY)) {
+        const { w, h } = sizeRef.current;
+        setView({ scale: p.scale, x: w / 2 - p.centerX * p.scale, y: h / 2 - p.centerY * p.scale });
+      } else if (typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y)) {
         setView({ scale: p.scale, x: p.x, y: p.y });
-      });
-      channel.subscribe((status) => {
-        // Ask the DM to replay its current viewport now that we're listening.
-        if (status === "SUBSCRIBED") {
-          channel.send({ type: "broadcast", event: "cast-hello", payload: {} });
-        }
-      });
+      }
+    });
+    if (isDM) {
+      const resend = () => {
+        const v = viewRef.current;
+        const { w, h } = sizeRef.current;
+        channel.send({ type: "broadcast", event: "view", payload: {
+          sceneId: sceneIdRef.current, ...v,
+          centerX: (w / 2 - v.x) / v.scale,
+          centerY: (h / 2 - v.y) / v.scale,
+        } });
+      };
+      channel.on("broadcast", { event: "cast-hello" }, resend);
+      channel.on("broadcast", { event: "player-view-hello" }, resend);
+      channel.subscribe();
     } else {
-      channel.on("broadcast", { event: "cast-hello" }, () => {
-        channel.send({
-          type: "broadcast",
-          event: "view",
-          payload: { sceneId: sceneIdRef.current, ...viewRef.current },
+      channel.subscribe((status) => {
+        if (status === "SUBSCRIBED") channel.send({
+          type: "broadcast", event: castMode ? "cast-hello" : "player-view-hello", payload: {},
         });
       });
-      channel.subscribe();
     }
-
     return () => {
       castChannelRef.current = null;
-      supabase.removeChannel(channel);
+      room.supabase.removeChannel(channel);
     };
   }, [isDM, castMode, room.supabase, scene.room_id]);
 
-  // DM: push the viewport to any cast screen whenever it changes (debounced).
+  useEffect(() => {
+    if (!forceFollow) return;
+    castChannelRef.current?.send({ type: "broadcast", event: "player-view-hello", payload: {} });
+  }, [forceFollow, scene.id]);
+
   useEffect(() => {
     if (castMode || !isDM) return;
     const channel = castChannelRef.current;
     if (!channel) return;
-    const id = setTimeout(() => {
-      channel.send({
-        type: "broadcast",
-        event: "view",
-        payload: { sceneId: scene.id, scale: view.scale, x: view.x, y: view.y },
-      });
-    }, 50);
+    const id = setTimeout(() => channel.send({ type: "broadcast", event: "view", payload: {
+      sceneId: scene.id, scale: view.scale, x: view.x, y: view.y,
+      centerX: (size.w / 2 - view.x) / view.scale,
+      centerY: (size.h / 2 - view.y) / view.scale,
+    } }), 65);
     return () => clearTimeout(id);
-  }, [castMode, isDM, view, scene.id]);
+  }, [castMode, isDM, view, scene.id, size.w, size.h]);
+
+  async function toggleFollow() {
+    if (!isDM || !room.room || room.room.active_scene_id !== scene.id) return;
+    const next = !room.room.force_view_sync;
+    const { error } = await room.supabase.from("rooms")
+      .update({ force_view_sync: next }).eq("id", room.room.id);
+    if (error) toast.error(error.message);
+    else toast.info(next ? "Players now follow your camera" : "Players can pan and zoom independently");
+  }
 
   // --- AOE broadcast --------------------------------------------------------
   // Everyone (not just the DM) opens this — AOE is a player tool too. Ephemeral only, like the
@@ -1349,7 +1369,7 @@ export function SceneCanvas({
   }, [scene.grid_enabled, scene.grid_size, bounds]);
 
   function handleWheel(e: Konva.KonvaEventObject<WheelEvent>) {
-    if (castMode) return;
+    if (castMode || forceFollow) { e.evt.preventDefault(); return; }
     e.evt.preventDefault();
     const stage = e.target.getStage();
     if (!stage) return;
@@ -1502,6 +1522,7 @@ export function SceneCanvas({
 
   // Pinch-to-zoom (two-finger) on touch devices.
   function pinchMove(e: Konva.KonvaEventObject<TouchEvent>) {
+    if (forceFollow) return;
     const t1 = e.evt.touches[0];
     const t2 = e.evt.touches[1];
     if (!t1 || !t2) return;
@@ -1730,6 +1751,7 @@ export function SceneCanvas({
 
   // Zoom around the centre of the viewport (used by the on-screen buttons).
   function zoomBy(factor: number) {
+    if (forceFollow) return;
     setView((v) => {
       let scale = v.scale * factor;
       scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
@@ -2312,12 +2334,24 @@ export function SceneCanvas({
       }}
       onDrop={handleAssetDrop}
     >
+      {isDM && (
+        <button type="button" onClick={() => void toggleFollow()}
+          disabled={room.room?.active_scene_id !== scene.id}
+          aria-pressed={!!room.room?.force_view_sync}
+          title="Force player camera to follow pan and zoom. Activate the scene before using it."
+          className={`absolute left-2 top-2 z-[35] rounded-lg border px-3 py-2 text-xs font-semibold shadow-lg disabled:opacity-50 ${room.room?.force_view_sync ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-neutral-700 bg-neutral-950/90 text-neutral-300"}`}
+        >
+          {room.room?.force_view_sync ? "🔒 Player View: Following" : "🔓 Force Follow View"}
+        </button>
+      )}
+      {forceFollow && <div className="pointer-events-none absolute left-2 top-2 z-[35] rounded border border-amber-600/60 bg-neutral-950/90 px-3 py-2 text-xs text-amber-300">🔒 Camera follows DM</div>}
       <Stage
         ref={stageRef}
         width={size.w}
         height={size.h}
         draggable={
           !castMode &&
+          !forceFollow &&
           !measuring &&
           !laserActive &&
           !drawingPolygon &&
@@ -2334,6 +2368,7 @@ export function SceneCanvas({
         scaleY={view.scale}
         onWheel={handleWheel}
         onDragEnd={(e) => {
+          if (forceFollow) return;
           // A pinch stops the drag mid-flight — don't clobber the pinched view.
           if (didPinch.current) {
             didPinch.current = false;

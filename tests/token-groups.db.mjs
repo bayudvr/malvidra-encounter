@@ -25,6 +25,7 @@ try {
     "0021_token_counters.sql","0023_seed_combatants_skip_hidden.sql","0026_asset_owner.sql",
     "0031_cross_scene_token_state.sql","0032_harden_state_rpc_permissions.sql",
     "20261102020000_token_groups.sql",
+    "20261102023000_force_view_sync.sql",
   ]) await load(f);
   await db.exec(`
     grant select,insert,update,delete on all tables in schema public to authenticated;
@@ -48,6 +49,12 @@ try {
   const previous=rows.length;
   await as(player);
   assert.equal((await q("select * from public.token_groups")).length,0);
+  assert.equal((await q("select force_view_sync from public.rooms where id=$1",[room]))[0].force_view_sync,false);
+  assert.equal((await q("update public.rooms set force_view_sync=true where id=$1 returning id",[room])).length,0);
+  await as(dm);
+  await q("update public.rooms set force_view_sync=true where id=$1",[room]);
+  assert.equal((await q("select force_view_sync from public.rooms where id=$1",[room]))[0].force_view_sync,true);
+  await as(player);
   await assert.rejects(q("select public.deploy_token_group($1,$2)",[g.id,scene]));
   await assert.rejects(q("insert into public.token_groups(room_id,name) values($1,'Hacked')",[room]));
   await as(foreignDm);

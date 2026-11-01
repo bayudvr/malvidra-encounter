@@ -53,6 +53,7 @@ export interface Database {
           invite_code: string;
           cast_token: string;
           active_scene_id: string | null;
+          force_view_sync: boolean;
           archived_at: string | null;
         } & Timestamps;
         Insert: {
@@ -62,12 +63,14 @@ export interface Database {
           invite_code?: string;
           cast_token?: string;
           active_scene_id?: string | null;
+          force_view_sync?: boolean;
           archived_at?: string | null;
           created_at?: string;
         };
         Update: {
           name?: string;
           active_scene_id?: string | null;
+          force_view_sync?: boolean;
           archived_at?: string | null;
         };
         Relationships: [];
