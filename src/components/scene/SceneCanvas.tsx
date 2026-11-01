@@ -730,7 +730,7 @@ export function SceneCanvas({
   useEffect(() => {
     if (!forceFollow) return;
     castChannelRef.current?.send({ type: "broadcast", event: "player-view-hello", payload: {} });
-  }, [forceFollow, scene.id]);
+  }, [forceFollow, scene.id, size.w, size.h]);
 
   useEffect(() => {
     if (castMode || !isDM) return;
@@ -2328,7 +2328,7 @@ export function SceneCanvas({
     if (readOnly) return;
     function onShortcut(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
-      if (target && (target.closest("input, textarea, select, [contenteditable], [role=dialog]"))) return;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable], [role=dialog]")) return;
       if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
       const key = event.key.toLowerCase();
       if (key === "?") {
