@@ -8,6 +8,51 @@ import type { Combatant, Token } from "@/lib/room/types";
 
 type StatField = "hp" | "max_hp" | "ac" | "temp_hp";
 
+// A snapshot is never fetched silently on scene change. Pulling requires an
+// explicit click and a server-side check that the other scene is newer.
+function PullLatestState({ room, token }: { room: RoomStore; token: Token }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const asset = room.assets.find((item) => item.id === token.asset_id);
+  if (!asset?.carry_state) return null;
+
+  async function pull() {
+    const confirmed = window.confirm(
+      "Use this token's latest state from another scene? HP, AC, conditions, counters, size, color and vision may change. Position, ownership, visibility and initiative stay the same.",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const { data, error } = await room.supabase.rpc("pull_latest_token_state", {
+        p_token: token.id,
+      });
+      if (error) {
+        toast.error(error.message);
+      } else if (data === "updated") {
+        toast.success("Latest token state restored from another scene");
+        room.reloadScene();
+      } else if (data === "up_to_date") {
+        toast.info("This token already has the newest state");
+      } else if (data === "no_source") {
+        toast.info("No matching token found in another scene");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void pull()}
+      className="mt-2 min-h-9 w-full rounded-lg border border-amber-700/60 bg-amber-900/15 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-900/30 disabled:opacity-50"
+    >
+      {busy ? "Pulling state…" : "↻ Pull Latest State"}
+    </button>
+  );
+}
+
 // Editing is performed on blur/Enter, not on every keypress. This also avoids
 // clobbering a half-typed value when a Realtime update arrives.
 function BattleStatField({
@@ -128,6 +173,7 @@ export function TokenBattleStats({
       <p className="mt-1 text-[10px] text-neutral-500">
         {combatant ? "Current battle state; saved for future scenes." : "Starting HP and AC for this scene."}
       </p>
+      <PullLatestState room={room} token={token} />
     </div>
   );
 }

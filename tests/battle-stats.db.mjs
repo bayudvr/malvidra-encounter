@@ -38,6 +38,7 @@ try {
     "0023_seed_combatants_skip_hidden.sql","0026_asset_owner.sql",
     "0031_cross_scene_token_state.sql","0032_harden_state_rpc_permissions.sql",
     "20261102010000_token_battle_stat_editor.sql",
+    "20261102013000_pull_latest_token_state.sql",
   ]) await load(file);
   await db.exec(`
     grant select,insert,update,delete on all tables in schema public to authenticated;
@@ -117,6 +118,42 @@ try {
   assert.deepEqual(await row("select hp,max_hp,ac from public.combatants where token_id=$1",[fresh.id]),
     {hp:12,max_hp:12,ac:16});
 
+  // Manual pull updates an existing scene token, not its position or owner.
+  await as(dm);
+  await db.query("insert into public.token_counters(token_id,room_id,name,current,max) values($1,$2,'Uses',2,5)",[original.id,room]);
+  await db.query("insert into public.token_counters(token_id,room_id,name,current,max) values($1,$2,'Stale',1,1)",[continued.id,room]);
+  await db.query("update public.tokens set state_changed_at=clock_timestamp() - interval '1 day' where id=$1",[continued.id]);
+  for (const [field,value] of [["hp",4],["max_hp",23],["ac",18],["temp_hp",2]]) {
+    await db.query("select public.set_token_battle_stat($1,$2,$3)",[original.id,field,value]);
+  }
+  await db.query("update public.combatants set conditions=array['Poisoned'] where id=$1",[c.id]);
+  const beforePull = await row("select x,y,owner_user_id,is_hidden from public.tokens where id=$1",[continued.id]);
+  await as(pc);
+  assert.equal((await row("select public.pull_latest_token_state($1) as status",[continued.id])).status,"updated");
+  assert.deepEqual(await row("select hp,max_hp,temp_hp,ac,conditions,is_hidden from public.combatants where token_id=$1",[continued.id]),
+    {hp:4,max_hp:23,temp_hp:2,ac:18,conditions:["Poisoned"],is_hidden:true});
+  assert.deepEqual(await row("select hp,ac from public.tokens where id=$1",[continued.id]),{hp:23,ac:18});
+  assert.deepEqual(await row("select x,y,owner_user_id,is_hidden from public.tokens where id=$1",[continued.id]),beforePull);
+  assert.deepEqual(await row("select name,current,max from public.token_counters where token_id=$1",[continued.id]),
+    {name:"Uses",current:2,max:5});
+  assert.equal((await row("select public.pull_latest_token_state($1) as status",[continued.id])).status,"up_to_date");
+  await db.query("select public.set_token_battle_stat($1,'hp',9)",[continued.id]);
+  assert.equal((await row("select public.pull_latest_token_state($1) as status",[continued.id])).status,"up_to_date");
+  assert.equal((await row("select hp from public.combatants where token_id=$1",[continued.id])).hp,9);
+
+  await as(other);
+  await denied("select public.pull_latest_token_state($1)",[continued.id]);
+  await as(stranger);
+  await denied("select public.pull_latest_token_state($1)",[continued.id]);
+  await as(stranger,"anon");
+  await denied("select public.pull_latest_token_state($1)",[continued.id]);
+
+  await as(dm);
+  await db.query("update public.assets set carry_state=true where id=$1",[freshAsset]);
+  assert.equal((await row("select public.pull_latest_token_state($1) as status",[fresh.id])).status,"no_source");
+  await db.query("update public.assets set carry_state=false where id=$1",[asset]);
+  await denied("select public.pull_latest_token_state($1)",[continued.id]);
+  await db.query("update public.assets set carry_state=true where id=$1",[asset]);
   console.log("Battle stat ownership, synchronization and scene continuity regression tests passed.");
 } finally {
   await db.close();

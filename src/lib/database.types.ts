@@ -652,6 +652,10 @@ export interface Database {
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
       send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
       rotate_cast_token: { Args: { p_room: string }; Returns: string };
+      pull_latest_token_state: {
+        Args: { p_token: string };
+        Returns: "updated" | "up_to_date" | "no_source";
+      };
       set_token_battle_stat: {
         Args: { p_token: string; p_field: string; p_value: number };
         Returns: undefined;
