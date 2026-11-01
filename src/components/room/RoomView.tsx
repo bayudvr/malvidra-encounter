@@ -15,6 +15,7 @@ import { TwistDreadProvider } from "@/components/room/TwistDreadProvider";
 import { TwistDreadPanel } from "@/components/room/TwistDreadPanel";
 import { RoomCountersPanel } from "@/components/room/RoomCountersPanel";
 import { AssetPanel } from "@/components/room/AssetPanel";
+import { TokenGroupPanel } from "@/components/room/TokenGroupPanel";
 import { RoomWebhookPanel } from "@/components/room/RoomWebhookPanel";
 import { SceneSettings } from "@/components/room/SceneSettings";
 import { ModeToggle } from "@/components/room/ModeToggle";
@@ -76,6 +77,7 @@ export function RoomView({
 
   const [drawerState, setDrawer] = useState<Drawer>(null);
   const [dmSection, setDmSection] = useState<DmSection>("scenes");
+  const [tokenSection, setTokenSection] = useState<"library" | "groups">("library");
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   // The initiative editor drawer is the DM's, and only during combat.
   const drawer =
@@ -250,7 +252,18 @@ export function RoomView({
               {scene && <SceneSettings key={scene.id} room={room} scene={scene} />}
             </>
           )}
-          {isDM && dmSection === "tokens" && <AssetPanel room={room} />}
+          {isDM && dmSection === "tokens" && (
+            <>
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-neutral-900 p-1" aria-label="Token tools">
+                {(["library", "groups"] as const).map((tab) => (
+                  <button key={tab} type="button" onClick={() => setTokenSection(tab)}
+                    aria-pressed={tokenSection === tab}
+                    className={`rounded px-3 py-2 text-xs font-medium capitalize ${tokenSection === tab ? "bg-amber-500/20 text-amber-200" : "text-neutral-400 hover:bg-neutral-800"}`}>{tab === "groups" ? "Party / Groups" : "Library"}</button>
+                ))}
+              </div>
+              {tokenSection === "library" ? <AssetPanel room={room} /> : <TokenGroupPanel room={room} />}
+            </>
+          )}
           {(!isDM || dmSection === "session") && (
             <>
               <TwistDreadPanel room={room} />

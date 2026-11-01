@@ -96,6 +96,18 @@ export interface Database {
         Update: { name?: string };
         Relationships: [];
       };
+      token_groups: {
+        Row: { id: string; room_id: string; name: string } & Timestamps;
+        Insert: { id?: string; room_id: string; name: string; created_at?: string };
+        Update: { name?: string };
+        Relationships: [];
+      };
+      token_group_items: {
+        Row: { id: string; room_id: string; group_id: string; asset_id: string; quantity: number; sort_order: number };
+        Insert: { id?: string; room_id: string; group_id: string; asset_id: string; quantity?: number; sort_order?: number };
+        Update: { quantity?: number; sort_order?: number };
+        Relationships: [];
+      };
       assets: {
         Row: {
           id: string;
@@ -638,6 +650,7 @@ export interface Database {
       };
       join_room: { Args: { p_code: string }; Returns: string };
       seed_scene_combatants: { Args: { p_scene: string }; Returns: undefined };
+      deploy_token_group: { Args: { p_group: string; p_scene: string }; Returns: number };
       spawn_asset_token: {
         Args: {
           p_scene: string;

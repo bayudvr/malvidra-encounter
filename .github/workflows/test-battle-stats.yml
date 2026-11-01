@@ -5,9 +5,13 @@ on:
     branches: [dev]
     paths:
       - 'src/components/scene/**'
+      - 'src/components/room/**'
+      - 'src/components/dice/**'
+      - 'src/components/toast.tsx'
       - 'src/lib/database.types.ts'
       - 'supabase/migrations/**'
       - 'tests/battle-stats.db.mjs'
+      - 'tests/token-groups.db.mjs'
       - 'package*.json'
       - '.github/workflows/test-battle-stats.yml'
   workflow_dispatch:
@@ -34,3 +38,5 @@ jobs:
         run: npm run lint -- src/components/scene/SceneCanvas.tsx src/components/scene/TokenBattleStats.tsx
       - name: Isolated Postgres regression
         run: npm run test:battle-stats
+      - name: Token-group RLS and deployment regression
+        run: npm run test:token-groups

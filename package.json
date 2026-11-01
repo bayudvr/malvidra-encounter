@@ -13,7 +13,8 @@
     "test:spectators": "node tests/spectators.db.mjs",
     "test:image-upload": "node --test tests/image-upload.mjs",
     "test:asset-folders": "node tests/asset-folders.db.mjs",
-    "test:battle-stats": "node tests/battle-stats.db.mjs"
+    "test:battle-stats": "node tests/battle-stats.db.mjs",
+    "test:token-groups": "node tests/token-groups.db.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box": "^1.1.4",
