@@ -140,8 +140,12 @@ try {
     {hp:4,max_hp:23,temp_hp:2,ac:18,conditions:["Poisoned"],is_hidden:true});
   assert.deepEqual(await row("select hp,ac from public.tokens where id=$1",[continued.id]),{hp:23,ac:18});
   assert.deepEqual(await row("select x,y,owner_user_id,is_hidden from public.tokens where id=$1",[continued.id]),beforePull);
+  // DM-only counters are copied through the RPC but remain private from players.
+  assert.equal((await row("select count(*)::int as n from public.token_counters where token_id=$1",[continued.id])).n,0);
+  await as(dm);
   assert.deepEqual(await row("select name,current,max from public.token_counters where token_id=$1",[continued.id]),
     {name:"Uses",current:2,max:5});
+  await as(pc);
   assert.equal((await row("select public.pull_latest_token_state($1) as status",[continued.id])).status,"up_to_date");
   await db.query("select public.set_token_battle_stat($1,'hp',9)",[continued.id]);
   assert.equal((await row("select public.pull_latest_token_state($1) as status",[continued.id])).status,"up_to_date");
