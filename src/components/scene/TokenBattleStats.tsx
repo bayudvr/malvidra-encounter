@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
@@ -23,6 +23,7 @@ function BattleStatField({
   const [draft, setDraft] = useState(value?.toString() ?? "");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const skipNextBlur = useRef(false);
 
   useEffect(() => {
     if (!editing && !saving) setDraft(value?.toString() ?? "");
@@ -72,10 +73,18 @@ function BattleStatField({
         disabled={saving}
         onFocus={(e) => { setEditing(true); e.currentTarget.select(); }}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void commit()}
+        onBlur={() => {
+          if (skipNextBlur.current) {
+            skipNextBlur.current = false;
+            setEditing(false);
+          } else {
+            void commit();
+          }
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); }
           if (e.key === "Escape") {
+            skipNextBlur.current = true;
             setDraft(value?.toString() ?? "");
             e.currentTarget.value = value?.toString() ?? "";
             e.currentTarget.blur();

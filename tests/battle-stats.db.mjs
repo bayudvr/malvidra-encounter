@@ -46,8 +46,8 @@ try {
     insert into public.rooms(id,name,dm_id,invite_code) values('${room}','Encounter','${dm}','ENCOUNTR');
     insert into public.room_members(room_id,user_id,role) values
       ('${room}','${dm}','dm'),('${room}','${pc}','player'),('${room}','${other}','player');
-    insert into public.scenes(id,room_id,name) values('${sceneA}','First','First');
-  `.replace(`('${sceneA}','First','First')`,`('${sceneA}','${room}','First')`));
+    insert into public.scenes(id,room_id,name) values('${sceneA}','${room}','First');
+  `);
   await db.query("insert into public.scenes(id,room_id,name) values($1,$2,'Next')",[sceneB,room]);
   await db.query(
     "insert into public.assets(id,room_id,name,owner_user_id,hp,ac,carry_state) values($1,$2,'Hero',$3,20,14,true)",
