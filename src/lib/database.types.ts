@@ -652,6 +652,10 @@ export interface Database {
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
       send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
       rotate_cast_token: { Args: { p_room: string }; Returns: string };
+      set_token_battle_stat: {
+        Args: { p_token: string; p_field: string; p_value: number };
+        Returns: undefined;
+      };
       adjust_own_combatant_hp: {
         Args: { p_combatant: string; p_delta: number };
         Returns: Database["public"]["Tables"]["combatants"]["Row"];

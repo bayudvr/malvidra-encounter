@@ -16,6 +16,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
+import { TokenBattleStats } from "@/components/scene/TokenBattleStats";
 import { rollLoot, type LootResult } from "@/lib/loot";
 import { stripTags } from "@/lib/reference/render";
 import { CONDITION_PRESETS, conditionColor } from "@/lib/conditions";
@@ -4137,6 +4138,9 @@ function MultiTokenBar({
         user_id: t.owner_user_id,
         token_id: t.id,
         is_hidden: t.is_hidden,
+        hp: t.hp,
+        max_hp: t.hp,
+        ac: t.ac,
         sort_order: base + i,
       })),
     );
@@ -4387,8 +4391,6 @@ function TokenInspector({
   const toast = useToast();
   const { style: dragStyle, dragHandleProps } = usePanelDrag(token.id);
   const [label, setLabel] = useState(token.label);
-  const [hp, setHp] = useState(token.hp);
-  const [ac, setAc] = useState(token.ac);
   const [visionFt, setVisionFt] = useState(token.vision_radius_ft ?? "");
   const [counters, setCounters] = useState<TokenCounter[]>([]);
   const [lootResult, setLootResult] = useState<LootResult | null>(null);
@@ -4615,28 +4617,7 @@ function TokenInspector({
         </select>
       </div>
 
-      <div className="mb-2 flex items-center gap-3 text-xs text-neutral-500">
-        <label className="flex items-center gap-1">
-          HP
-          <input
-            type="number"
-            value={hp}
-            onChange={(e) => setHp(Number(e.target.value))}
-            onBlur={() => hp !== token.hp && update({ hp })}
-            className="w-12 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-neutral-200"
-          />
-        </label>
-        <label className="flex items-center gap-1">
-          AC
-          <input
-            type="number"
-            value={ac}
-            onChange={(e) => setAc(Number(e.target.value))}
-            onBlur={() => ac !== token.ac && update({ ac })}
-            className="w-12 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-neutral-200"
-          />
-        </label>
-      </div>
+      <TokenBattleStats room={room} token={token} combatant={existingCombatant ?? null} />
 
       <label className="mb-2 flex items-center gap-2 text-xs text-neutral-300">
         <input
@@ -4920,6 +4901,8 @@ function PlayerTokenPanel({
           ✕
         </button>
       </div>
+
+      <TokenBattleStats room={room} token={token} combatant={combatant} />
 
       {combatant ? (
         <section className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3">
