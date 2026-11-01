@@ -42,6 +42,14 @@ function CanvasSkeleton() {
 }
 
 type Drawer = "panels" | "initiative" | null;
+type DmSection = "scenes" | "tokens" | "session" | "players" | "settings";
+const DM_SECTIONS: { id: DmSection; label: string; icon: string }[] = [
+  { id: "scenes", label: "Scenes", icon: "🗺️" },
+  { id: "tokens", label: "Tokens", icon: "♟" },
+  { id: "session", label: "Session", icon: "🎲" },
+  { id: "players", label: "Players", icon: "👥" },
+  { id: "settings", label: "Settings", icon: "⚙️" },
+];
 
 export function RoomView({
   roomId,
@@ -67,6 +75,7 @@ export function RoomView({
   }, [room.kicked, router]);
 
   const [drawerState, setDrawer] = useState<Drawer>(null);
+  const [dmSection, setDmSection] = useState<DmSection>("scenes");
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   // The initiative editor drawer is the DM's, and only during combat.
   const drawer =
@@ -216,13 +225,42 @@ export function RoomView({
               ✕
             </button>
           </div>
-          {isDM && <SceneList room={room} />}
-          {isDM && scene && <SceneSettings key={scene.id} room={room} scene={scene} />}
-          {isDM && <AssetPanel room={room} />}
-          {isDM && <RoomWebhookPanel room={room} />}
-          <TwistDreadPanel room={room} />
-          <RoomCountersPanel room={room} isDM={isDM} />
-          <MemberPanel room={room} roomName={room.room?.name ?? roomName} />
+          {isDM && (
+            <nav aria-label="DM panel navigation" className="sticky -top-3 z-10 -mx-3 -mt-3 grid grid-cols-3 gap-1 border-b border-neutral-800 bg-neutral-950 p-2 lg:grid-cols-2">
+              {DM_SECTIONS.map((section) => (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-current={dmSection === section.id ? "page" : undefined}
+                  onClick={() => setDmSection(section.id)}
+                  className={`rounded-md px-1.5 py-2 text-center text-[11px] font-medium transition-colors ${
+                    dmSection === section.id
+                      ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40"
+                      : "text-neutral-400 hover:bg-neutral-800 hover:text-white"
+                  }`}
+                >
+                  <span aria-hidden="true">{section.icon}</span> {section.label}
+                </button>
+              ))}
+            </nav>
+          )}
+          {(!isDM || dmSection === "scenes") && isDM && (
+            <>
+              <SceneList room={room} />
+              {scene && <SceneSettings key={scene.id} room={room} scene={scene} />}
+            </>
+          )}
+          {isDM && dmSection === "tokens" && <AssetPanel room={room} />}
+          {(!isDM || dmSection === "session") && (
+            <>
+              <TwistDreadPanel room={room} />
+              <RoomCountersPanel room={room} isDM={isDM} />
+            </>
+          )}
+          {(!isDM || dmSection === "players") && (
+            <MemberPanel room={room} roomName={room.room?.name ?? roomName} />
+          )}
+          {isDM && dmSection === "settings" && <RoomWebhookPanel room={room} />}
         </aside>
 
         <main className="relative min-w-0 flex-1 bg-neutral-950">

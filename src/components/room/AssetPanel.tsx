@@ -156,6 +156,15 @@ export function AssetPanel({ room }: { room: RoomStore }) {
         placeholder="Search tokens…"
         className="mb-2"
       />
+      <Button
+        size="sm"
+        variant="secondary"
+        className="mb-2 w-full"
+        disabled={!room.room}
+        onClick={() => setShowCreate(true)}
+      >
+        + New token
+      </Button>
       <ul className="space-y-1">
         {visibleAssets.map((a) => (
           <AssetRow
@@ -181,16 +190,6 @@ export function AssetPanel({ room }: { room: RoomStore }) {
           </li>
         )}
       </ul>
-
-      <Button
-        size="sm"
-        variant="secondary"
-        className="mt-3 w-full"
-        disabled={!room.room}
-        onClick={() => setShowCreate(true)}
-      >
-        + New token
-      </Button>
 
       {showCreate && room.room && (
         <CreateAssetModal

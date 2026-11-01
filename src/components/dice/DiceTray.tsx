@@ -256,7 +256,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
           setLog((prev) => [row, ...prev.filter((r) => r.id !== row.id)]
             .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 50));
           if (payload.eventType === "INSERT" && row.user_id !== room.userId) {
-            toast.info(`🎲 ${row.actor_name}: ${row.notation} = ${row.total}`);
+            toast.roll(`🎲 ${row.actor_name}: ${row.notation} = ${row.total}`);
           }
         },
       )
@@ -275,7 +275,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
           total: number;
         };
         if (p.fromUserId === room.userId) return; // DM rolling for themself — already shown locally.
-        toast.info(`🎲🔒 ${p.actorName} (private): ${p.notation} = ${p.total}`);
+        toast.roll(`🎲🔒 ${p.actorName} (private): ${p.notation} = ${p.total}`);
       })
       .subscribe();
     channelRef.current = channel;
@@ -478,17 +478,17 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       } else if (visibility === "dm") {
         if (room.role === "dm") {
           // The DM rolling "privately" has no one else to hide it from — just their own toast.
-          toast.info(`🔒 ${notation} = ${total}`);
+          toast.roll(`🔒 ${notation} = ${total}`);
         } else {
           channelRef.current?.send({
             type: "broadcast",
             event: "private-roll",
             payload: { fromUserId: room.userId, actorName, notation, total },
           });
-          toast.info(`Sent privately to the DM: ${notation} = ${total}`);
+          toast.roll(`Sent privately to the DM: ${notation} = ${total}`);
         }
       } else {
-        toast.info(`🔒 ${notation} = ${total}`);
+        toast.roll(`🔒 ${notation} = ${total}`);
       }
     } catch {
       toast.error(houseRoll ? "Could not save reroll. If dice landed, retry saves the same values." : request ? "Could not finish request. If dice landed, retry saving the same result." : "Roll failed");
