@@ -118,8 +118,14 @@ try {
   assert.deepEqual(await row("select hp,max_hp,ac from public.combatants where token_id=$1",[fresh.id]),
     {hp:12,max_hp:12,ac:16});
 
-  // Manual pull updates an existing scene token, not its position or owner.
+  // A player must not pull from a source now owned by somebody else.
+  await as(pc);
+  assert.equal((await row("select public.pull_latest_token_state($1) as status",[continued.id])).status,"no_source");
+
+  // Restore ownership so this character's previous scene can be synced.
   await as(dm);
+  await db.query("update public.tokens set owner_user_id=$1 where id=$2",[pc,original.id]);
+  // Manual pull updates an existing scene token, not its position or owner.
   await db.query("insert into public.token_counters(token_id,room_id,name,current,max) values($1,$2,'Uses',2,5)",[original.id,room]);
   await db.query("insert into public.token_counters(token_id,room_id,name,current,max) values($1,$2,'Stale',1,1)",[continued.id,room]);
   await db.query("update public.tokens set state_changed_at=clock_timestamp() - interval '1 day' where id=$1",[continued.id]);
