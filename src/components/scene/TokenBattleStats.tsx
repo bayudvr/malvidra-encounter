@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useToast } from "@/components/toast";
+import { CONDITION_PRESETS, conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type { Combatant, Token } from "@/lib/room/types";
 
@@ -141,6 +142,52 @@ function BattleStatField({
   );
 }
 
+function TokenConditionControls({ room, token, combatant }: {
+  room: RoomStore;
+  token: Token;
+  combatant: Combatant | null;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+
+  async function toggle(name: string) {
+    if (busy) return;
+    setBusy(true);
+    const { error } = await room.supabase.rpc("toggle_token_condition", {
+      p_token: token.id,
+      p_condition: name,
+    });
+    setBusy(false);
+    if (error) toast.error(error.message);
+    else room.reloadScene();
+  }
+
+  const conditions = combatant?.conditions ?? [];
+  return (
+    <details className="mt-2 rounded border border-neutral-800 p-2">
+      <summary className="cursor-pointer text-xs font-semibold text-neutral-300">
+        Conditions {conditions.length > 0 ? "(" + conditions.join(", ") + ")" : "(none)"}
+      </summary>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        {CONDITION_PRESETS.map((preset) => {
+          const active = conditions.includes(preset.name);
+          return (
+            <button key={preset.name} type="button" disabled={busy}
+              onClick={() => void toggle(preset.name)}
+              aria-pressed={active}
+              className={"min-h-9 rounded border px-2 py-1 text-left text-xs disabled:opacity-50 " +
+                (active ? "border-amber-500/60 bg-amber-500/10 text-neutral-100" :
+                  "border-neutral-700 bg-neutral-900 text-neutral-400")}>
+              <span aria-hidden="true" className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: conditionColor(preset.name) }}/>
+              {preset.name}
+            </button>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
 export function TokenBattleStats({
   room, token, combatant,
 }: {
@@ -171,8 +218,9 @@ export function TokenBattleStats({
         ))}
       </div>
       <p className="mt-1 text-[10px] text-neutral-500">
-        {combatant ? "Current battle state; saved for future scenes." : "Starting HP and AC for this scene."}
+        Current HP is tracked independently from Max HP, even during exploration.
       </p>
+      <TokenConditionControls room={room} token={token} combatant={combatant} />
       <PullLatestState room={room} token={token} />
     </div>
   );

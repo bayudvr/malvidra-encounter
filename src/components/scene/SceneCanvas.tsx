@@ -4942,12 +4942,13 @@ function PlayerTokenPanel({
   const [hpDelta, setHpDelta] = useState("");
 
   async function adjustHp(delta: number) {
-    if (!combatant || delta === 0) return;
-    const { error } = await room.supabase.rpc("adjust_own_combatant_hp", {
-      p_combatant: combatant.id,
+    if (delta === 0) return;
+    const { error } = await room.supabase.rpc("adjust_token_hp", {
+      p_token: token.id,
       p_delta: delta,
     });
     if (error) toast.error(error.message);
+    else room.reloadScene();
   }
 
   async function commitHpDelta() {
@@ -4960,15 +4961,6 @@ function PlayerTokenPanel({
     }
     setHpDelta("");
     await adjustHp(Math.trunc(parsed));
-  }
-
-  async function toggleCondition(name: string) {
-    if (!combatant) return;
-    const { error } = await room.supabase.rpc("toggle_own_combatant_condition", {
-      p_combatant: combatant.id,
-      p_condition: name,
-    });
-    if (error) toast.error(error.message);
   }
 
   async function addAura() {
@@ -4993,8 +4985,8 @@ function PlayerTokenPanel({
     if (error) toast.error(error.message);
   }
 
-  const hp = combatant?.hp ?? null;
-  const maxHp = combatant?.max_hp ?? null;
+  const hp = combatant?.hp ?? token.hp;
+  const maxHp = combatant?.max_hp ?? token.hp;
   const tempHp = combatant?.temp_hp ?? 0;
   const hpPct =
     hp != null && maxHp != null && maxHp > 0
@@ -5020,8 +5012,7 @@ function PlayerTokenPanel({
 
       <TokenBattleStats room={room} token={token} combatant={combatant} />
 
-      {combatant ? (
-        <section className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3">
+      <section className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3">
           <div className="mb-2 flex items-end justify-between gap-2">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -5087,43 +5078,7 @@ function PlayerTokenPanel({
             Damage uses temporary HP first. Healing stops at max HP.
           </p>
         </section>
-      ) : (
-        <div className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3 text-xs text-neutral-500">
-          HP and conditions become available when this token is in combat.
-        </div>
-      )}
 
-      {combatant && (
-        <section className="mb-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-            Conditions
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-2">
-            {CONDITION_PRESETS.map((cond) => {
-              const active = combatant.conditions.includes(cond.name);
-              return (
-                <button
-                  key={cond.name}
-                  type="button"
-                  onClick={() => toggleCondition(cond.name)}
-                  className={`min-h-11 rounded-lg border px-2 text-left text-xs font-medium active:scale-[0.99] ${
-                    active
-                      ? "border-current bg-neutral-800 text-neutral-100"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-400"
-                  }`}
-                  style={active ? { color: conditionColor(cond.name) } : undefined}
-                >
-                  <span
-                    className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ background: conditionColor(cond.name) }}
-                  />
-                  {cond.name}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )}
 
       <section>
         <div className="mb-2 flex items-center justify-between">
