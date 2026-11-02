@@ -31,6 +31,7 @@ import type {
   TokenUpdate,
 } from "@/lib/room/types";
 import { TokenSprite } from "@/components/scene/TokenSprite";
+import { shouldRevealTokenStats } from "@/lib/scene/combatVisuals";
 
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
@@ -2527,10 +2528,8 @@ export function SceneCanvas({
             .filter((t) => isDM || !t.is_hidden)
             .map((t) => {
               const owned = room.role === "player" && t.owner_user_id === room.userId;
-              // Not gated on inCombat: seed_scene_combatants (0002/0015) deliberately keeps a
-              // token's combatant row across an End Combat toggle ("without losing initiative or
-              // HP") specifically so a downed/wounded look still shows afterward — only "Reset
-              // combat" (InitiativeTracker) actually clears it.
+              // Keep combatant state available between encounters and scenes,
+              // but never render its HP/AC HUD after the scene leaves combat.
               const combatant = combatantByToken.get(t.id) ?? null;
               return (
                 <TokenSprite
@@ -2556,7 +2555,7 @@ export function SceneCanvas({
                     combatant.id === scene.active_combatant_id
                   }
                   combatant={combatant}
-                  revealStats={isDM || !!combatant?.is_player}
+                  revealStats={shouldRevealTokenStats(scene.mode, isDM, !!combatant?.is_player)}
                   speechText={speechByToken.get(t.id) ?? null}
                   remotePos={remoteDrags.get(t.id) ?? null}
                   onSelect={(e) => {

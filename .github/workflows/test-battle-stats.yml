@@ -12,6 +12,8 @@ on:
       - 'supabase/migrations/**'
       - 'tests/battle-stats.db.mjs'
       - 'tests/token-groups.db.mjs'
+      - 'tests/combat-visuals.mjs'
+      - 'src/lib/scene/combatVisuals.ts'
       - 'package*.json'
       - '.github/workflows/test-battle-stats.yml'
   workflow_dispatch:
@@ -40,3 +42,5 @@ jobs:
         run: npm run test:battle-stats
       - name: Token-group RLS and deployment regression
         run: npm run test:token-groups
+      - name: Combat visual regression
+        run: npm run test:combat-visuals
