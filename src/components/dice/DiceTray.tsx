@@ -478,13 +478,13 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
         usedFallback = true;
       }
       const { bySides, detail, total } = outcome;
-      if (usedFallback) {
-        toast.roll(`🎲 2D roll: ${detail.map((g) => `d${g.sides} [${g.values.join(", ")}]`).join(" · ")} = ${total}`);
-      }
 
       const actorName =
         room.members.find((m) => m.user_id === room.userId)?.display_name ??
         "Someone";
+
+      const banner = bannerForRoll({ actorName, notation, detail, total });
+      const localMessage = usedFallback ? `${banner.message} · 2D` : banner.message;
 
       // Only a public roll ever touches the shared/permanent log (dice_rolls) — "DM roll" and
       // "self roll" are relayed live (or, for self, not relayed at all) and never written
@@ -510,20 +510,21 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
           total,
         });
         if (error) toast.error(error.message);
+        else toast.roll(localMessage, banner.variant);
       } else if (visibility === "dm") {
         if (room.role === "dm") {
-          // The DM rolling "privately" has no one else to hide it from — just their own toast.
-          toast.roll(`🔒 ${notation} = ${total}`);
+          // A private result stays off the shared dice_rolls feed.
+          toast.roll(`🔒 ${localMessage}`, banner.variant);
         } else {
           channelRef.current?.send({
             type: "broadcast",
             event: "private-roll",
-            payload: { fromUserId: room.userId, actorName, notation, total },
+            payload: { fromUserId: room.userId, actorName, notation, total, variant: banner.variant },
           });
-          toast.roll(`Sent privately to the DM: ${notation} = ${total}`);
+          toast.roll(`🔒 Sent to DM: ${localMessage}`, banner.variant);
         }
       } else {
-        toast.roll(`🔒 ${notation} = ${total}`);
+        toast.roll(`🔒 ${localMessage}`, banner.variant);
       }
     } catch {
       toast.error(houseRoll ? "Could not save reroll. If dice landed, retry saves the same values." : request ? "Could not finish request. If dice landed, retry saving the same result." : "Roll failed");
