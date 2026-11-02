@@ -41,7 +41,7 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
       - name: ESLint
-        run: npm run lint -- src/components/scene/SceneCanvas.tsx src/components/scene/TokenBattleStats.tsx
+        run: npm run lint -- src/components/scene/SceneCanvas.tsx src/components/scene/TokenBattleStats.tsx src/components/room/ImageUploadButton.tsx src/lib/image-upload.ts
       - name: Isolated Postgres regression
         run: npm run test:battle-stats
       - name: Token-group RLS and deployment regression
