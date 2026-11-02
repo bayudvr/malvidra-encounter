@@ -23,3 +23,9 @@ export function matchesImageType(bytes: Uint8Array, type: string): boolean {
     default: return false;
   }
 }
+
+/** Local picker and drag/drop share the same image rules and single-file limit. */
+export function droppedImageError(files: FileList | File[]): string | null {
+  if (files.length !== 1) return "Drop one image at a time.";
+  return imageFileError(files[0]);
+}
