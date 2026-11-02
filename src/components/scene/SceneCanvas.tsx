@@ -16,9 +16,9 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useImage } from "@/lib/useImage";
 import { useToast } from "@/components/toast";
+import { TokenBattleStats } from "@/components/scene/TokenBattleStats";
 import { rollLoot, type LootResult } from "@/lib/loot";
 import { stripTags } from "@/lib/reference/render";
-import { CONDITION_PRESETS, conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type {
   Combatant,
@@ -30,6 +30,7 @@ import type {
   TokenUpdate,
 } from "@/lib/room/types";
 import { TokenSprite } from "@/components/scene/TokenSprite";
+import { shouldRevealTokenStats } from "@/lib/scene/combatVisuals";
 
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
@@ -394,6 +395,8 @@ export function SceneCanvas({
   const stageRef = useRef<Konva.Stage>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState({ scale: 0.6, x: 40, y: 40 });
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const forceFollow = !isDM && !castMode && !!room.room?.force_view_sync;
   // Token selection is a set — one token shows the inspector, several show the
   // bulk-action bar and drag/hide together. DM only.
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -667,7 +670,11 @@ export function SceneCanvas({
   // verbatim. Ephemeral broadcast (no DB writes) on a per-room channel.
   const castChannelRef = useRef<RealtimeChannel | null>(null);
   const viewRef = useRef(view);
+  const sizeRef = useRef(size);
+  const followRef = useRef(forceFollow);
   const sceneIdRef = useRef(scene.id);
+  useEffect(() => { followRef.current = forceFollow; }, [forceFollow]);
+  useEffect(() => { sizeRef.current = size; }, [size]);
   useEffect(() => {
     viewRef.current = view;
   }, [view]);
@@ -675,62 +682,76 @@ export function SceneCanvas({
     sceneIdRef.current = scene.id;
   }, [scene.id]);
 
+  // Broadcast the DM's map centre to cast screens and force-follow players.
+  // A persisted room flag (DM-write RLS) authorizes player camera following.
   useEffect(() => {
-    if (!isDM && !castMode) return;
-    const supabase = room.supabase;
-    const channel = supabase.channel(`cast:${scene.room_id}`, {
+    const channel = room.supabase.channel(`cast:${scene.room_id}`, {
       config: { broadcast: { self: false } },
     });
     castChannelRef.current = channel;
-
-    if (castMode) {
-      channel.on("broadcast", { event: "view" }, ({ payload }) => {
-        const p = payload as {
-          sceneId: string;
-          scale: number;
-          x: number;
-          y: number;
-        };
-        if (p.sceneId !== sceneIdRef.current) return;
+    channel.on("broadcast", { event: "view" }, ({ payload }) => {
+      if (isDM || (!castMode && !followRef.current)) return;
+      const p = payload as { sceneId?: string; scale?: number; x?: number; y?: number; centerX?: number; centerY?: number };
+      if (p.sceneId !== sceneIdRef.current || typeof p.scale !== "number" || !Number.isFinite(p.scale)) return;
+      if (p.scale < MIN_SCALE || p.scale > MAX_SCALE) return;
+      if (typeof p.centerX === "number" && Number.isFinite(p.centerX) && typeof p.centerY === "number" && Number.isFinite(p.centerY)) {
+        const { w, h } = sizeRef.current;
+        setView({ scale: p.scale, x: w / 2 - p.centerX * p.scale, y: h / 2 - p.centerY * p.scale });
+      } else if (typeof p.x === "number" && Number.isFinite(p.x) && typeof p.y === "number" && Number.isFinite(p.y)) {
         setView({ scale: p.scale, x: p.x, y: p.y });
-      });
-      channel.subscribe((status) => {
-        // Ask the DM to replay its current viewport now that we're listening.
-        if (status === "SUBSCRIBED") {
-          channel.send({ type: "broadcast", event: "cast-hello", payload: {} });
-        }
-      });
+      }
+    });
+    if (isDM) {
+      const resend = () => {
+        const v = viewRef.current;
+        const { w, h } = sizeRef.current;
+        channel.send({ type: "broadcast", event: "view", payload: {
+          sceneId: sceneIdRef.current, ...v,
+          centerX: (w / 2 - v.x) / v.scale,
+          centerY: (h / 2 - v.y) / v.scale,
+        } });
+      };
+      channel.on("broadcast", { event: "cast-hello" }, resend);
+      channel.on("broadcast", { event: "player-view-hello" }, resend);
+      channel.subscribe();
     } else {
-      channel.on("broadcast", { event: "cast-hello" }, () => {
-        channel.send({
-          type: "broadcast",
-          event: "view",
-          payload: { sceneId: sceneIdRef.current, ...viewRef.current },
+      channel.subscribe((status) => {
+        if (status === "SUBSCRIBED") channel.send({
+          type: "broadcast", event: castMode ? "cast-hello" : "player-view-hello", payload: {},
         });
       });
-      channel.subscribe();
     }
-
     return () => {
       castChannelRef.current = null;
-      supabase.removeChannel(channel);
+      room.supabase.removeChannel(channel);
     };
   }, [isDM, castMode, room.supabase, scene.room_id]);
 
-  // DM: push the viewport to any cast screen whenever it changes (debounced).
+  useEffect(() => {
+    if (!forceFollow) return;
+    castChannelRef.current?.send({ type: "broadcast", event: "player-view-hello", payload: {} });
+  }, [forceFollow, scene.id, size.w, size.h]);
+
   useEffect(() => {
     if (castMode || !isDM) return;
     const channel = castChannelRef.current;
     if (!channel) return;
-    const id = setTimeout(() => {
-      channel.send({
-        type: "broadcast",
-        event: "view",
-        payload: { sceneId: scene.id, scale: view.scale, x: view.x, y: view.y },
-      });
-    }, 50);
+    const id = setTimeout(() => channel.send({ type: "broadcast", event: "view", payload: {
+      sceneId: scene.id, scale: view.scale, x: view.x, y: view.y,
+      centerX: (size.w / 2 - view.x) / view.scale,
+      centerY: (size.h / 2 - view.y) / view.scale,
+    } }), 65);
     return () => clearTimeout(id);
-  }, [castMode, isDM, view, scene.id]);
+  }, [castMode, isDM, view, scene.id, size.w, size.h]);
+
+  async function toggleFollow() {
+    if (!isDM || !room.room || room.room.active_scene_id !== scene.id) return;
+    const next = !room.room.force_view_sync;
+    const { error } = await room.supabase.from("rooms")
+      .update({ force_view_sync: next }).eq("id", room.room.id);
+    if (error) toast.error(error.message);
+    else toast.info(next ? "Players now follow your camera" : "Players can pan and zoom independently");
+  }
 
   // --- AOE broadcast --------------------------------------------------------
   // Everyone (not just the DM) opens this — AOE is a player tool too. Ephemeral only, like the
@@ -1348,7 +1369,7 @@ export function SceneCanvas({
   }, [scene.grid_enabled, scene.grid_size, bounds]);
 
   function handleWheel(e: Konva.KonvaEventObject<WheelEvent>) {
-    if (castMode) return;
+    if (castMode || forceFollow) { e.evt.preventDefault(); return; }
     e.evt.preventDefault();
     const stage = e.target.getStage();
     if (!stage) return;
@@ -1501,6 +1522,7 @@ export function SceneCanvas({
 
   // Pinch-to-zoom (two-finger) on touch devices.
   function pinchMove(e: Konva.KonvaEventObject<TouchEvent>) {
+    if (forceFollow) return;
     const t1 = e.evt.touches[0];
     const t2 = e.evt.touches[1];
     if (!t1 || !t2) return;
@@ -1729,6 +1751,7 @@ export function SceneCanvas({
 
   // Zoom around the centre of the viewport (used by the on-screen buttons).
   function zoomBy(factor: number) {
+    if (forceFollow) return;
     setView((v) => {
       let scale = v.scale * factor;
       scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
@@ -2299,6 +2322,74 @@ export function SceneCanvas({
     return targets;
   }, [pings, remoteLasers]);
 
+  // Desktop map shortcuts. Never intercept editing, browser/system shortcuts
+  // or key presses from a modal/form. L is the existing hold-to-laser tool.
+  useEffect(() => {
+    if (readOnly) return;
+    function onShortcut(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable], [role=dialog]")) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      const key = event.key.toLowerCase();
+      if (key === "?") {
+        event.preventDefault();
+        setShowShortcuts((old) => !old);
+        return;
+      }
+      if (key === "escape") {
+        setShowShortcuts(false);
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false);
+        setSelectMode(false); setFogMenu(false); setMeasureMenu(false);
+        clearTargetLock();
+        return;
+      }
+      if (aoeMode && ["1","2","3","4"].includes(key)) {
+        event.preventDefault();
+        setAoeMode((["cone","line","cube","circle"] as const)[Number(key)-1]);
+        return;
+      }
+      if (!["v","m","a","t","d","f"].includes(key)) return;
+      if (key === "v" && !isDM) return;
+      if (key === "f" && (!isDM || !scene.fog_enabled)) return;
+      event.preventDefault();
+      if (key === "t") {
+        if (targetMode || localTargetLock) clearTargetLock();
+        else beginTargetMode();
+        return;
+      }
+      if (key === "v") {
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false);
+        setSelectMode((v) => !v);
+      } else if (key === "m") {
+        const next = !measuring;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        setMeasuring(next);
+      } else if (key === "a") {
+        const next = !aoeMode;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        if (next) setAoeMode("circle");
+      } else if (key === "d") {
+        const next = !drawMode;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        if (next) setDrawMode("pen");
+      } else if (key === "f") {
+        const next = !drawingPolygon;
+        exitMeasure(); exitAoe(); exitDraw(); exitLaser();
+        cancelPolygon(); cancelWall(); setAddingDoor(false); setSelectMode(false);
+        if (next) { setPolygonPoints([]); setDrawingPolygon(true); }
+      }
+    }
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+    // The handler must follow the current active tool modes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, isDM, scene.fog_enabled, measuring, aoeMode, drawMode, drawingPolygon, targetMode, localTargetLock]);
+
   return (
     <div
       ref={wrapRef}
@@ -2311,12 +2402,39 @@ export function SceneCanvas({
       }}
       onDrop={handleAssetDrop}
     >
+      {isDM && (
+        <button type="button" onClick={() => void toggleFollow()}
+          disabled={room.room?.active_scene_id !== scene.id}
+          aria-pressed={!!room.room?.force_view_sync}
+          title="Force player camera to follow pan and zoom. Activate the scene before using it."
+          className={`absolute left-2 top-2 z-[35] rounded-lg border px-3 py-2 text-xs font-semibold shadow-lg disabled:opacity-50 ${room.room?.force_view_sync ? "border-amber-400 bg-amber-400/20 text-amber-200" : "border-neutral-700 bg-neutral-950/90 text-neutral-300"}`}
+        >
+          {room.room?.force_view_sync ? "🔒 Player View: Following" : "🔓 Force Follow View"}
+        </button>
+      )}
+      {forceFollow && <div className="pointer-events-none absolute left-2 top-2 z-[35] rounded border border-amber-600/60 bg-neutral-950/90 px-3 py-2 text-xs text-amber-300">🔒 Camera follows DM</div>}
+      {!readOnly && <button type="button" onClick={() => setShowShortcuts((v) => !v)}
+        aria-expanded={showShortcuts} aria-label="Show keyboard shortcuts"
+        className={`absolute left-2 top-14 z-[35] rounded border px-2 py-1 text-xs ${showShortcuts ? "border-amber-500 bg-amber-500/20 text-amber-200" : "border-neutral-700 bg-neutral-950/90 text-neutral-300"}`}>⌨ Shortcuts (?)</button>}
+      {showShortcuts && !readOnly && (
+        <div className="absolute left-2 top-24 z-[40] max-w-[min(90vw,22rem)] rounded-xl border border-neutral-700 bg-neutral-950/95 p-3 text-xs text-neutral-200 shadow-2xl" role="dialog" aria-label="Keyboard shortcuts">
+          <div className="mb-2 flex items-center justify-between gap-3"><strong>Map shortcuts</strong><button type="button" onClick={() => setShowShortcuts(false)} aria-label="Close keyboard shortcuts">✕</button></div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {[
+              ["V","Select (DM)"],["M","Measure"],["A","AOE circle"],["1–4","AOE shapes"],
+              ["T","Target"],["D","Draw"],["F","Fog (DM)"],["L hold","Laser"],["Esc","Clear tools"],["?","Toggle help"],
+            ].map(([key,label]) => <div key={key}><kbd className="rounded bg-neutral-800 px-1.5 py-0.5 text-amber-300">{key}</kbd> {label}</div>)}
+          </div>
+          <p className="mt-3 text-neutral-500">Shortcuts pause while you type in a field.</p>
+        </div>
+      )}
       <Stage
         ref={stageRef}
         width={size.w}
         height={size.h}
         draggable={
           !castMode &&
+          !forceFollow &&
           !measuring &&
           !laserActive &&
           !drawingPolygon &&
@@ -2333,6 +2451,7 @@ export function SceneCanvas({
         scaleY={view.scale}
         onWheel={handleWheel}
         onDragEnd={(e) => {
+          if (forceFollow) return;
           // A pinch stops the drag mid-flight — don't clobber the pinched view.
           if (didPinch.current) {
             didPinch.current = false;
@@ -2408,10 +2527,8 @@ export function SceneCanvas({
             .filter((t) => isDM || !t.is_hidden)
             .map((t) => {
               const owned = room.role === "player" && t.owner_user_id === room.userId;
-              // Not gated on inCombat: seed_scene_combatants (0002/0015) deliberately keeps a
-              // token's combatant row across an End Combat toggle ("without losing initiative or
-              // HP") specifically so a downed/wounded look still shows afterward — only "Reset
-              // combat" (InitiativeTracker) actually clears it.
+              // Render battle stats throughout the adventure, including trap
+              // damage in exploration. Stored combatant state survives modes.
               const combatant = combatantByToken.get(t.id) ?? null;
               return (
                 <TokenSprite
@@ -2437,7 +2554,7 @@ export function SceneCanvas({
                     combatant.id === scene.active_combatant_id
                   }
                   combatant={combatant}
-                  revealStats={isDM || !!combatant?.is_player}
+                  revealStats={shouldRevealTokenStats(scene.mode, isDM, !!combatant?.is_player)}
                   speechText={speechByToken.get(t.id) ?? null}
                   remotePos={remoteDrags.get(t.id) ?? null}
                   onSelect={(e) => {
@@ -4137,6 +4254,9 @@ function MultiTokenBar({
         user_id: t.owner_user_id,
         token_id: t.id,
         is_hidden: t.is_hidden,
+        hp: t.hp,
+        max_hp: t.hp,
+        ac: t.ac,
         sort_order: base + i,
       })),
     );
@@ -4387,8 +4507,6 @@ function TokenInspector({
   const toast = useToast();
   const { style: dragStyle, dragHandleProps } = usePanelDrag(token.id);
   const [label, setLabel] = useState(token.label);
-  const [hp, setHp] = useState(token.hp);
-  const [ac, setAc] = useState(token.ac);
   const [visionFt, setVisionFt] = useState(token.vision_radius_ft ?? "");
   const [counters, setCounters] = useState<TokenCounter[]>([]);
   const [lootResult, setLootResult] = useState<LootResult | null>(null);
@@ -4615,28 +4733,7 @@ function TokenInspector({
         </select>
       </div>
 
-      <div className="mb-2 flex items-center gap-3 text-xs text-neutral-500">
-        <label className="flex items-center gap-1">
-          HP
-          <input
-            type="number"
-            value={hp}
-            onChange={(e) => setHp(Number(e.target.value))}
-            onBlur={() => hp !== token.hp && update({ hp })}
-            className="w-12 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-neutral-200"
-          />
-        </label>
-        <label className="flex items-center gap-1">
-          AC
-          <input
-            type="number"
-            value={ac}
-            onChange={(e) => setAc(Number(e.target.value))}
-            onBlur={() => ac !== token.ac && update({ ac })}
-            className="w-12 rounded border border-neutral-700 bg-neutral-950 px-1 py-0.5 text-neutral-200"
-          />
-        </label>
-      </div>
+      <TokenBattleStats room={room} token={token} combatant={existingCombatant ?? null} />
 
       <label className="mb-2 flex items-center gap-2 text-xs text-neutral-300">
         <input
@@ -4845,12 +4942,13 @@ function PlayerTokenPanel({
   const [hpDelta, setHpDelta] = useState("");
 
   async function adjustHp(delta: number) {
-    if (!combatant || delta === 0) return;
-    const { error } = await room.supabase.rpc("adjust_own_combatant_hp", {
-      p_combatant: combatant.id,
+    if (delta === 0) return;
+    const { error } = await room.supabase.rpc("adjust_token_hp", {
+      p_token: token.id,
       p_delta: delta,
     });
     if (error) toast.error(error.message);
+    else room.reloadScene();
   }
 
   async function commitHpDelta() {
@@ -4863,15 +4961,6 @@ function PlayerTokenPanel({
     }
     setHpDelta("");
     await adjustHp(Math.trunc(parsed));
-  }
-
-  async function toggleCondition(name: string) {
-    if (!combatant) return;
-    const { error } = await room.supabase.rpc("toggle_own_combatant_condition", {
-      p_combatant: combatant.id,
-      p_condition: name,
-    });
-    if (error) toast.error(error.message);
   }
 
   async function addAura() {
@@ -4896,8 +4985,8 @@ function PlayerTokenPanel({
     if (error) toast.error(error.message);
   }
 
-  const hp = combatant?.hp ?? null;
-  const maxHp = combatant?.max_hp ?? null;
+  const hp = combatant?.hp ?? token.hp;
+  const maxHp = combatant?.max_hp ?? token.hp;
   const tempHp = combatant?.temp_hp ?? 0;
   const hpPct =
     hp != null && maxHp != null && maxHp > 0
@@ -4921,8 +5010,9 @@ function PlayerTokenPanel({
         </button>
       </div>
 
-      {combatant ? (
-        <section className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3">
+      <TokenBattleStats room={room} token={token} combatant={combatant} />
+
+      <section className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3">
           <div className="mb-2 flex items-end justify-between gap-2">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
@@ -4988,43 +5078,7 @@ function PlayerTokenPanel({
             Damage uses temporary HP first. Healing stops at max HP.
           </p>
         </section>
-      ) : (
-        <div className="mb-4 rounded-lg border border-neutral-800 bg-neutral-950/70 p-3 text-xs text-neutral-500">
-          HP and conditions become available when this token is in combat.
-        </div>
-      )}
 
-      {combatant && (
-        <section className="mb-4">
-          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-            Conditions
-          </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-2">
-            {CONDITION_PRESETS.map((cond) => {
-              const active = combatant.conditions.includes(cond.name);
-              return (
-                <button
-                  key={cond.name}
-                  type="button"
-                  onClick={() => toggleCondition(cond.name)}
-                  className={`min-h-11 rounded-lg border px-2 text-left text-xs font-medium active:scale-[0.99] ${
-                    active
-                      ? "border-current bg-neutral-800 text-neutral-100"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-400"
-                  }`}
-                  style={active ? { color: conditionColor(cond.name) } : undefined}
-                >
-                  <span
-                    className="mr-2 inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ background: conditionColor(cond.name) }}
-                  />
-                  {cond.name}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      )}
 
       <section>
         <div className="mb-2 flex items-center justify-between">

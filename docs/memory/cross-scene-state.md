@@ -50,3 +50,17 @@ feature-branch-only implementation.
    fresh. Switching continuity back on resumes last known state.
 7. Verify fresh start, scene-switch reload, token deletion and casting on
    two browsers; verify RLS as player and as cast-token receiver.
+
+## Pull Latest State on an existing token (20261102013000)
+
+- In a token's battle panel, DM or the active owning player can explicitly
+  choose **Pull Latest State**. The library asset must enable `carry_state`.
+- The server searches other scenes in the *same room* for the same asset,
+  prioritizing `state_changed_at`; owning players can only use their own
+  nonhidden source token, while DMs may use any source for the asset.
+- A newer source replaces current/max/temporary HP, AC, conditions, counters,
+  size, color and vision. It does **not** change label, image, token ID,
+  ownership, scene, position, visibility, initiative, active turn or auras.
+- A target with newer state is never overwritten, and no source yields a
+  harmless informational result. No automatic sync occurs merely by
+  switching scenes. Existing historical tokens are not changed by migration.

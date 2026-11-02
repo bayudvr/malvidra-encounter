@@ -4,7 +4,7 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-type Toast = { id: number; message: string; kind: "info" | "error" | "success" };
+type Toast = { id: number; message: string; kind: "info" | "error" | "success" | "roll" };
 
 const ToastContext = React.createContext<(t: Omit<Toast, "id">) => void>(
   () => {},
@@ -25,7 +25,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={push}>
       {children}
       <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2">
-        {toasts.map((t) => (
+        {toasts.filter((t) => t.kind !== "roll").map((t) => (
           <div
             key={t.id}
             className={cn(
@@ -42,6 +42,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           </div>
         ))}
       </div>
+      <div role="status" aria-live="polite" className="pointer-events-none fixed inset-0 z-[120] flex flex-col items-center justify-center gap-2 p-4">
+        {toasts.filter((t) => t.kind === "roll").slice(-3).map((t) => (
+          <div key={t.id} className="max-w-[min(90vw,28rem)] rounded-xl border border-amber-500/50 bg-neutral-950/95 px-5 py-3 text-center text-sm font-semibold text-amber-100 shadow-2xl backdrop-blur">
+            {t.message}
+          </div>
+        ))}
+      </div>
     </ToastContext.Provider>
   );
 }
@@ -52,5 +59,6 @@ export function useToast() {
     info: (message: string) => push({ message, kind: "info" }),
     error: (message: string) => push({ message, kind: "error" }),
     success: (message: string) => push({ message, kind: "success" }),
+    roll: (message: string) => push({ message, kind: "roll" }),
   };
 }

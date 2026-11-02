@@ -53,6 +53,7 @@ export interface Database {
           invite_code: string;
           cast_token: string;
           active_scene_id: string | null;
+          force_view_sync: boolean;
           archived_at: string | null;
         } & Timestamps;
         Insert: {
@@ -62,12 +63,14 @@ export interface Database {
           invite_code?: string;
           cast_token?: string;
           active_scene_id?: string | null;
+          force_view_sync?: boolean;
           archived_at?: string | null;
           created_at?: string;
         };
         Update: {
           name?: string;
           active_scene_id?: string | null;
+          force_view_sync?: boolean;
           archived_at?: string | null;
         };
         Relationships: [];
@@ -94,6 +97,18 @@ export interface Database {
         Row: { id: string; room_id: string; name: string } & Timestamps;
         Insert: { id?: string; room_id: string; name: string; created_at?: string };
         Update: { name?: string };
+        Relationships: [];
+      };
+      token_groups: {
+        Row: { id: string; room_id: string; name: string } & Timestamps;
+        Insert: { id?: string; room_id: string; name: string; created_at?: string };
+        Update: { name?: string };
+        Relationships: [];
+      };
+      token_group_items: {
+        Row: { id: string; room_id: string; group_id: string; asset_id: string; quantity: number; sort_order: number };
+        Insert: { id?: string; room_id: string; group_id: string; asset_id: string; quantity?: number; sort_order?: number };
+        Update: { quantity?: number; sort_order?: number };
         Relationships: [];
       };
       assets: {
@@ -638,6 +653,7 @@ export interface Database {
       };
       join_room: { Args: { p_code: string }; Returns: string };
       seed_scene_combatants: { Args: { p_scene: string }; Returns: undefined };
+      deploy_token_group: { Args: { p_group: string; p_scene: string }; Returns: number };
       spawn_asset_token: {
         Args: {
           p_scene: string;
@@ -652,6 +668,22 @@ export interface Database {
       is_room_dm: { Args: { p_room: string }; Returns: boolean };
       send_test_discord_webhook: { Args: { p_room: string }; Returns: undefined };
       rotate_cast_token: { Args: { p_room: string }; Returns: string };
+      pull_latest_token_state: {
+        Args: { p_token: string };
+        Returns: "updated" | "up_to_date" | "no_source";
+      };
+      adjust_token_hp: {
+        Args: { p_token: string; p_delta: number };
+        Returns: Database["public"]["Tables"]["combatants"]["Row"];
+      };
+      toggle_token_condition: {
+        Args: { p_token: string; p_condition: string };
+        Returns: Database["public"]["Tables"]["combatants"]["Row"];
+      };
+      set_token_battle_stat: {
+        Args: { p_token: string; p_field: string; p_value: number };
+        Returns: undefined;
+      };
       adjust_own_combatant_hp: {
         Args: { p_combatant: string; p_delta: number };
         Returns: Database["public"]["Tables"]["combatants"]["Row"];
