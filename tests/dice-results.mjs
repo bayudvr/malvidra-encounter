@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import DiceParser from "@3d-dice/dice-parser-interface";
+// The published package has extensionless ESM re-exports that plain Node 22 cannot resolve.
+// Import its real implementation directly for regression tests (Next bundles the normal entry in-app).
+import DiceParser from "@3d-dice/dice-parser-interface/src/ParserInterface.js";
 import { normalizeDiceBoxResults, rollWithout3D } from "../src/lib/dice/rollResults.ts";
 
 const dp = () => new DiceParser();
