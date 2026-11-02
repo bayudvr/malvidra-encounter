@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type DiceBox from "@3d-dice/dice-box";
 import DiceParser from "@3d-dice/dice-parser-interface";
+import { normalizeDiceBoxResults, rollWithout3D } from "@/lib/dice/rollResults";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useToast } from "@/components/toast";
@@ -155,6 +156,8 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
   const mountedRef = useRef(false);
   const loadingRef = useRef(false);
   const [boxReady, setBoxReady] = useState(false);
+  const [diceMode, setDiceMode] = useState<"3d" | "2d">("3d");
+  const [engineRetry, setEngineRetry] = useState(0);
   const [theme, setTheme] = useState(loadSavedTheme);
   const dpRef = useRef<DiceParser | null>(null);
   if (dpRef.current === null) { dpRef.current = new DiceParser(); }
@@ -206,14 +209,18 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       box.hide();
       setBoxReady(true);
     })()
-      .catch(() => toast.error("Dice engine failed to load"))
+      .catch(() => {
+        setBoxReady(false);
+        setDiceMode("2d");
+        toast.info("3D dice are unavailable. 2D rolls are ready.");
+      })
       .finally(() => {
         loadingRef.current = false;
       });
     // Closing while init is in flight must not discard the engine: a pending
     // Twist/Dread reroll can be resumed as soon as initialization finishes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trayOpen]);
+  }, [trayOpen, engineRetry]);
 
   // Recent rolls + live feed for the whole room.
   // `toast` deliberately excluded from deps below — useToast() returns a new
@@ -399,53 +406,64 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       return;
     }
     const box = boxRef.current;
-    if (!box) {
-      toast.info("Dice still loading…");
-      return;
-    }
     const dp = dpRef.current!;
-    // A previous roll may be mid-fade-out (or already hidden) — cancel that
-    // and bring the dice back before rolling again.
-    clearHideTimer();
-    box.show();
     rollLock.current = true;
     setRolling(true);
     try {
-      // Parse the roll20-style notation into the plain {qty,sides,mods}
-      // groups dice-box's physics engine expects, roll them for real, then
-      // feed the actual rolled values back through the parser so it can
-      // apply kh1/kl1 (and any future modifiers) to the true 3D results —
-      // the parser never invents its own numbers.
       const dieGroups = dp.parseNotation(notation);
-      const raw = await box.roll(dieGroups);
-      // Dice have landed — fade them out after a few seconds so they stop
-      // sitting on top of the map.
-      hideTimerRef.current = setTimeout(() => {
-        box.hide("dice-box-canvas--hide");
-        hideTimerRef.current = null;
-      }, 4000);
-      const results = Array.isArray(raw)
-        ? raw
-        : ((raw as { rolls?: typeof raw })?.rolls ?? []);
+      const finalize = (raw: unknown) => {
+        const result = normalizeDiceBoxResults(dieGroups, raw);
+        const parsed = dp.parseFinalResults(result.groups);
+        if (typeof parsed.value !== "number" || !Number.isFinite(parsed.value)) {
+          throw new Error("Dice parser returned an invalid total");
+        }
+        const detail = collectDetail(parsed);
+        if (detail.length === 0) throw new Error("Dice parser returned no rolled faces");
+        return { bySides: result.bySides, detail, total: parsed.value };
+      };
 
-      // Our own notation builder never emits two groups with the same
-      // `sides` in one roll, so grouping the flat physics output back up
-      // by side count is an unambiguous way to match it to its group.
-      const bySides = new Map<number, { sides: number; value: number }[]>();
-      for (const r of results) {
-        const sides = Number(r.sides);
-        const arr = bySides.get(sides) ?? [];
-        arr.push({ sides, value: r.value });
-        bySides.set(sides, arr);
+      let outcome: ReturnType<typeof finalize> | null = null;
+      let usedFallback = diceMode === "2d" || !box || !boxReady;
+      if (!usedFallback && box) {
+        clearHideTimer();
+        try {
+          box.show();
+          // A frozen GPU simulation must never trap the session forever.
+          // The timed-out promise remains handled by Promise.race.
+          const raw = await Promise.race([
+            box.roll(dieGroups),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("3D roll timed out")), 12000)),
+          ]);
+          outcome = finalize(raw);
+          hideTimerRef.current = setTimeout(() => {
+            box.hide("dice-box-canvas--hide");
+            hideTimerRef.current = null;
+          }, 4000);
+        } catch (error) {
+          console.warn("[dice] 3D engine returned an invalid/incomplete roll", error);
+          clearHideTimer();
+          box.hide();
+          usedFallback = true;
+          setDiceMode("2d");
+          toast.info("3D animation failed. Switched to reliable 2D rolls.");
+        }
       }
-      const groupsForParser = dieGroups.map((g) => ({
-        ...g,
-        rolls: bySides.get(Number(g.sides)) ?? [],
-      }));
-      const finalResults = dp.parseFinalResults(groupsForParser);
-
-      const detail = collectDetail(finalResults);
-      const total = finalResults.value;
+      if (!outcome) {
+        // Crypto-based fallback is only invoked when the physics renderer is
+        // unavailable. No partial physical values or fabricated zeros are saved.
+        const cryptoRoll = () => {
+          const bytes = new Uint32Array(1);
+          window.crypto.getRandomValues(bytes);
+          return bytes[0];
+        };
+        outcome = finalize(rollWithout3D(dieGroups, cryptoRoll));
+        usedFallback = true;
+      }
+      const { bySides, detail, total } = outcome;
+      if (usedFallback) {
+        toast.roll(`🎲 2D roll: ${detail.map((g) => `d${g.sides} [${g.values.join(", ")}]`).join(" · ")} = ${total}`);
+      }
 
       const actorName =
         room.members.find((m) => m.user_id === room.userId)?.display_name ??
@@ -496,6 +514,17 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       rollLock.current = false;
       setRolling(false);
     }
+  }
+
+  function retry3d() {
+    if (rollLock.current) return;
+    setDiceMode("3d");
+    if (boxRef.current && boxReady) {
+      boxRef.current.hide();
+      return;
+    }
+    setBoxReady(false);
+    setEngineRetry((n) => n + 1);
   }
 
   function handleThemeChange(next: string) {
@@ -557,6 +586,9 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
                 </option>
               ))}
             </select>
+            {diceMode === "2d" && <button type="button" disabled={rolling} onClick={retry3d}
+              title="2D uses secure random dice. Retry 3D animation when ready."
+              className="shrink-0 rounded border border-amber-500/50 px-1.5 py-1 text-[10px] text-amber-200 disabled:opacity-50">2D · Retry 3D</button>}
             <button
               type="button"
               onClick={closeTray}
@@ -704,15 +736,13 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
             {houseRoll?.status !== "rolled" && <button
               type="button"
               onClick={roll}
-              disabled={diceCount === 0 || rolling || (!boxReady && !retryRoll && !retryHouse)}
+              disabled={diceCount === 0 || diceCount > 40 || rolling}
               className="w-full rounded-md bg-amber-500 py-2 text-sm font-semibold text-neutral-950 hover:bg-amber-400 disabled:opacity-50"
             >
-              {(retryHouse || retryRoll) && !rolling ? "Retry saving roll" : !boxReady
-                ? "Loading dice…"
-                : rolling
+              {(retryHouse || retryRoll) && !rolling ? "Retry saving roll" : rolling
                   ? "Rolling…"
                   : notation
-                    ? `Roll  ${notation}`
+                    ? `Roll ${notation}${diceCount > 40 ? " (max 40 dice)" : diceMode === "2d" || !boxReady ? " · 2D" : ""}`
                     : "Roll"}
             </button>}
           </div>}

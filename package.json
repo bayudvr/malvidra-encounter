@@ -15,7 +15,8 @@
     "test:asset-folders": "node tests/asset-folders.db.mjs",
     "test:battle-stats": "node tests/battle-stats.db.mjs",
     "test:token-groups": "node tests/token-groups.db.mjs",
-    "test:combat-visuals": "node --test tests/combat-visuals.mjs"
+    "test:combat-visuals": "node --test tests/combat-visuals.mjs",
+    "test:dice-results": "node --test tests/dice-results.mjs"
   },
   "dependencies": {
     "@3d-dice/dice-box": "^1.1.4",
