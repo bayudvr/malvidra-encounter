@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 
 import { Button } from "@/components/ui";
 import { useToast } from "@/components/toast";
-import { imageFileError, IMAGE_TYPES, IMAGE_UPLOAD_HINT } from "@/lib/image-upload";
+import { droppedImageError, imageFileError, IMAGE_TYPES, IMAGE_UPLOAD_HINT } from "@/lib/image-upload";
 
 export function ImageUploadButton({
   roomId,
@@ -23,6 +23,8 @@ export function ImageUploadButton({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploaded, setUploaded] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
 
   useEffect(() => () => pending.current?.abort(), []);
 
@@ -80,8 +82,64 @@ export function ImageUploadButton({
     }
   }
 
+  // Only handle actual files: token-library items have their own draggable
+  // payload, and dragging one must never accidentally trigger an image upload.
+  function hasFiles(event: DragEvent<HTMLDivElement>) {
+    return Array.from(event.dataTransfer.types).includes("Files") || event.dataTransfer.files.length > 0;
+  }
+
+  function onDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    if (disabled || busy) return;
+    dragDepth.current += 1;
+    setDragging(true);
+  }
+
+  function onDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = disabled || busy ? "none" : "copy";
+  }
+
+  function onDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
+  }
+
+  function onDrop(event: DragEvent<HTMLDivElement>) {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current = 0;
+    setDragging(false);
+    if (disabled || busy || pending.current) return;
+    const fileError = droppedImageError(event.dataTransfer.files);
+    if (fileError) {
+      setError(fileError);
+      setUploaded(false);
+      toast.error(fileError);
+      return;
+    }
+    void upload(event.dataTransfer.files[0]);
+  }
+
   return (
-    <div className="space-y-1">
+    <div
+      aria-label="Image upload drop zone"
+      aria-busy={busy}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={`rounded-lg border-2 border-dashed px-3 py-3 text-center transition-colors ${
+        disabled ? "border-neutral-800 bg-neutral-900/40 opacity-60" :
+        dragging ? "border-amber-400 bg-amber-500/15" :
+        "border-neutral-700 bg-neutral-900/40 hover:border-neutral-600"
+      }`}
+    >
       <input
         ref={input}
         type="file"
@@ -95,6 +153,10 @@ export function ImageUploadButton({
           if (file) void upload(file);
         }}
       />
+      <p className="mb-1 text-xs font-medium text-neutral-200">
+        {dragging ? "Release to upload image" : "Drag & drop image here"}
+      </p>
+      <p className="mb-2 text-[11px] text-neutral-500">or</p>
       <Button
         type="button"
         size="sm"
@@ -103,13 +165,13 @@ export function ImageUploadButton({
         aria-busy={busy}
         onClick={() => input.current?.click()}
       >
-        {busy ? "Uploading…" : "Upload to Imgur"}
+        {busy ? "Uploading…" : "Choose image"}
       </Button>
-      <p className={`text-[10px] ${uploaded ? "text-emerald-400" : "text-neutral-500"}`} role="status">
-        {busy ? "Uploading image. Please wait…" : uploaded ? "Image uploaded." : IMAGE_UPLOAD_HINT}
+      <p className={`mt-2 text-[10px] ${uploaded ? "text-emerald-400" : "text-neutral-500"}`} role="status">
+        {busy ? "Uploading to Imgur…" : uploaded ? "Image uploaded." : IMAGE_UPLOAD_HINT}
       </p>
       {error && (
-        <p className="text-xs text-red-400" role="alert">
+        <p className="mt-1 text-xs text-red-400" role="alert">
           {error}
         </p>
       )}
