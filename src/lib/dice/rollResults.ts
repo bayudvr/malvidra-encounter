@@ -3,12 +3,7 @@
  * physics results ({ type: "d20", value: 17 }). Never silently pass missing
  * dice to dice-parser-interface: it can produce an incorrect zero.
  */
-export type ParsedDiceGroup = {
-  qty: number;
-  sides: number | string;
-  rolls?: unknown[];
-  [key: string]: unknown;
-};
+export type ParsedDiceGroup = { qty: number; sides: number | string };
 
 export type ValidDie = { sides: number; value: number; groupId: number; rollId: number };
 
@@ -57,8 +52,8 @@ function physicalRolls(raw: unknown): {
   return flat;
 }
 
-export function normalizeDiceBoxResults(groups: ParsedDiceGroup[], raw: unknown): {
-  groups: ParsedDiceGroup[];
+export function normalizeDiceBoxResults<T extends ParsedDiceGroup>(groups: T[], raw: unknown): {
+  groups: Array<T & { groupId: number; rolls: ValidDie[] }>;
   bySides: Map<number, { sides: number; value: number }[]>;
 } {
   if (groups.length === 0) throw new Error("No dice groups");
@@ -78,7 +73,7 @@ export function normalizeDiceBoxResults(groups: ParsedDiceGroup[], raw: unknown)
 
   const copied = groups.map((group, index) => ({
     ...group,
-    groupId: Number.isInteger(group.groupId) ? group.groupId : index,
+    groupId: "groupId" in group && Number.isInteger(group.groupId) ? Number(group.groupId) : index,
     rolls: [] as ValidDie[],
   }));
   for (const die of dice) {
@@ -113,7 +108,9 @@ export function normalizeDiceBoxResults(groups: ParsedDiceGroup[], raw: unknown)
 }
 
 /** Unbiased OS-backed fallback, only used when 3D rendering fails. */
-export function rollWithout3D(groups: ParsedDiceGroup[], randomUint32: () => number): ParsedDiceGroup[] {
+export function rollWithout3D<T extends ParsedDiceGroup>(
+  groups: T[], randomUint32: () => number,
+): Array<T & { groupId: number; rolls: ValidDie[] }> {
   return groups.map((g, groupId) => {
     const sides = sidesOf(g);
     if (!sides || !Number.isInteger(g.qty) || g.qty < 1 || g.qty > 40) {
