@@ -104,20 +104,21 @@ try {
   // The carried combatant is the source of truth, so pre-combat here is not applicable.
   assert.equal((await row("select ac from public.combatants where token_id=$1",[continued.id])).ac,19);
 
-  // A token without a combatant gets its HP/AC edited directly.
+  // A token without a combatant creates a tracker on first edit, even in exploration.
   const freshAsset = randomUUID();
   await db.query("insert into public.assets(id,room_id,name,owner_user_id,hp,ac) values($1,$2,'New Hero',$3,10,10)",[freshAsset,room,pc]);
   const fresh = await row("select * from public.spawn_asset_token($1,$2,0::float8,0::float8)",[sceneB,freshAsset]);
   await as(pc);
-  await db.query("select public.set_token_battle_stat($1,'hp',12)",[fresh.id]);
+  await db.query("select public.set_token_battle_stat($1,'max_hp',12)",[fresh.id]);
+  await db.query("select public.set_token_battle_stat($1,'hp',9)",[fresh.id]);
   await db.query("select public.set_token_battle_stat($1,'ac',16)",[fresh.id]);
   assert.deepEqual(await row("select hp,ac from public.tokens where id=$1",[fresh.id]),{hp:12,ac:16});
-  await denied("select public.set_token_battle_stat($1,'temp_hp',2)",[fresh.id]);
+  await db.query("select public.set_token_battle_stat($1,'temp_hp',2)",[fresh.id]);
   await as(dm);
   await db.query("update public.tokens set is_hidden=false where id=$1",[fresh.id]);
   await db.query("select public.seed_scene_combatants($1)",[sceneB]);
-  assert.deepEqual(await row("select hp,max_hp,ac from public.combatants where token_id=$1",[fresh.id]),
-    {hp:12,max_hp:12,ac:16});
+  assert.deepEqual(await row("select hp,max_hp,temp_hp,ac from public.combatants where token_id=$1",[fresh.id]),
+    {hp:9,max_hp:12,temp_hp:2,ac:16});
 
   // A player must not pull from a source now owned by somebody else.
   await as(pc);

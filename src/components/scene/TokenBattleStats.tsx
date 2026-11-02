@@ -196,11 +196,9 @@ export function TokenBattleStats({
   combatant: Combatant | null;
 }) {
   const fields: { field: StatField; label: string; value: number | null }[] = [
-    { field: "hp", label: combatant ? "Current HP" : "HP", value: combatant?.hp ?? token.hp },
-    ...(combatant ? [
-      { field: "max_hp" as const, label: "Max HP", value: combatant.max_hp },
-      { field: "temp_hp" as const, label: "Temp HP", value: combatant.temp_hp ?? 0 },
-    ] : []),
+    { field: "hp", label: "Current HP", value: combatant?.hp ?? token.hp },
+    { field: "max_hp", label: "Max HP", value: combatant?.max_hp ?? token.hp },
+    { field: "temp_hp", label: "Temp HP", value: combatant?.temp_hp ?? 0 },
     { field: "ac", label: "AC", value: combatant?.ac ?? token.ac },
   ];
 
