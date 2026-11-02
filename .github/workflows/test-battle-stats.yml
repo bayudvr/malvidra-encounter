@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/components/scene/**'
       - 'src/components/room/**'
+      - 'src/lib/image-upload.ts'
+      - 'tests/image-upload.mjs'
       - 'src/components/dice/**'
       - 'src/lib/dice/**'
       - 'tests/dice-results.mjs'
@@ -48,3 +50,5 @@ jobs:
         run: npm run test:combat-visuals
       - name: Dice engine and parser regressions
         run: npm run test:dice-results
+      - name: Image upload and drag-drop regressions
+        run: npm run test:image-upload
