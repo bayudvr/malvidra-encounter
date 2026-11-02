@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import type DiceBox from "@3d-dice/dice-box";
 import DiceParser from "@3d-dice/dice-parser-interface";
 import { normalizeDiceBoxResults, rollWithout3D } from "@/lib/dice/rollResults";
+import { bannerForRoll, type RollVariant } from "@/lib/dice/rollBanner";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 import { useToast } from "@/components/toast";
@@ -262,8 +263,14 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
           const row = payload.new as RollRow;
           setLog((prev) => [row, ...prev.filter((r) => r.id !== row.id)]
             .sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 50));
+          // The roller announces after the database write succeeds; the rest of
+          // the room receives the same result through the shared Realtime log.
           if (payload.eventType === "INSERT" && row.user_id !== room.userId) {
-            toast.roll(`🎲 ${row.actor_name}: ${row.notation} = ${row.total}`);
+            const banner = bannerForRoll({
+              actorName: row.actor_name, notation: row.notation,
+              detail: row.detail, total: row.total,
+            });
+            toast.roll(banner.message, banner.variant);
           }
         },
       )
@@ -280,9 +287,10 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
           actorName: string;
           notation: string;
           total: number;
+          variant?: RollVariant;
         };
         if (p.fromUserId === room.userId) return; // DM rolling for themself — already shown locally.
-        toast.roll(`🎲🔒 ${p.actorName} (private): ${p.notation} = ${p.total}`);
+        toast.roll(`🎲🔒 ${p.actorName} (private): ${p.notation} = ${p.total}`, p.variant);
       })
       .subscribe();
     channelRef.current = channel;
@@ -343,7 +351,16 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       delete next[target.id];
       return next;
     });
-    toast.success(`Request completed: ${data.result_notation} = ${data.result_total}`);
+    // Requested d20 rolls are public, but the RPC inserts the shared row.
+    // The other room members see its INSERT; this client shows it once here.
+    if (typeof data.result_total === "number" && data.result_notation) {
+      const actorName = room.members.find((m) => m.user_id === room.userId)?.display_name ?? "Player";
+      const banner = bannerForRoll({
+        actorName, notation: data.result_notation,
+        detail: [{ sides: 20, values: result.values }], total: data.result_total,
+      });
+      toast.roll(banner.message, banner.variant);
+    }
     onRequestCompleted?.(data);
   }
 
