@@ -103,7 +103,7 @@ export function ImageUploadButton({
   }
 
   function onDragLeave(event: DragEvent<HTMLDivElement>) {
-    if (!hasFiles(event)) return;
+    if (!hasFiles(event) && dragDepth.current === 0) return;
     event.preventDefault();
     dragDepth.current = Math.max(0, dragDepth.current - 1);
     if (dragDepth.current === 0) setDragging(false);
@@ -128,6 +128,7 @@ export function ImageUploadButton({
 
   return (
     <div
+      role="group"
       aria-label="Image upload drop zone"
       aria-busy={busy}
       onDragEnter={onDragEnter}
