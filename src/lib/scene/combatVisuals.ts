@@ -1,14 +1,18 @@
 /**
- * Combatants persist after combat ends so that HP, AC and conditions are not
- * lost. The token HUD, however, is a combat-only presentation.
+ * HP, AC and conditions are relevant outside combat (traps, falling, hazards).
+ * The caller already filters hidden tokens; this is only a display decision,
+ * not a substitute for database RLS or hidden-token checks.
  *
- * Only the DM can see NPC battle stats. Player battle stats remain visible
- * to participants during combat, matching existing visibility rules.
+ * Do not hide visible NPC stats or exploration stats from participants.
  */
 export function shouldRevealTokenStats(
   sceneMode: "exploration" | "combat",
   isDM: boolean,
   combatantIsPlayer: boolean,
 ): boolean {
-  return sceneMode === "combat" && (isDM || combatantIsPlayer);
+  // Kept in the signature for compatibility with other call sites.
+  void sceneMode;
+  void isDM;
+  void combatantIsPlayer;
+  return true;
 }

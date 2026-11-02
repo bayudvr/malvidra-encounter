@@ -672,6 +672,14 @@ export interface Database {
         Args: { p_token: string };
         Returns: "updated" | "up_to_date" | "no_source";
       };
+      adjust_token_hp: {
+        Args: { p_token: string; p_delta: number };
+        Returns: Database["public"]["Tables"]["combatants"]["Row"];
+      };
+      toggle_token_condition: {
+        Args: { p_token: string; p_condition: string };
+        Returns: Database["public"]["Tables"]["combatants"]["Row"];
+      };
       set_token_battle_stat: {
         Args: { p_token: string; p_field: string; p_value: number };
         Returns: undefined;

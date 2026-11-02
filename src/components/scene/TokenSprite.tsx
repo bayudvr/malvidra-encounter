@@ -100,9 +100,13 @@ export function TokenSprite({
   const radius = (token.size * gridSize) / 2;
   const tint = token.color ?? colorFromString(token.label);
 
-  const showStats = !!combatant && !!revealStats;
-  const maxHp = combatant?.max_hp ?? 0;
-  const hp = combatant?.hp ?? 0;
+  // Tokens always have baseline HP/AC, even before a combatant is first
+  // created. If a combatant exists, use its current HP and conditions in
+  // both exploration and combat. Never leak hidden tokens to the viewer.
+  const showStats = !!revealStats;
+  const maxHp = combatant?.max_hp ?? token.hp;
+  const hp = combatant?.hp ?? token.hp;
+  const ac = combatant?.ac ?? token.ac;
   const tempHp = combatant?.temp_hp ?? 0;
   const ratio = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : null;
 
@@ -117,10 +121,8 @@ export function TokenSprite({
 
   const statText = showStats
     ? [
-        combatant?.hp != null
-          ? `${hp}${tempHp > 0 ? `+${tempHp}` : ""}${maxHp ? `/${maxHp}` : ""}`
-          : null,
-        combatant?.ac != null ? `AC ${combatant.ac}` : null,
+        `${hp}${tempHp > 0 ? `+${tempHp}` : ""}/${maxHp}`,
+        `AC ${ac}`,
       ]
         .filter(Boolean)
         .join("   ")

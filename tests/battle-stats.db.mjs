@@ -38,6 +38,7 @@ try {
     "0023_seed_combatants_skip_hidden.sql","0026_asset_owner.sql",
     "0031_cross_scene_token_state.sql","0032_harden_state_rpc_permissions.sql",
     "20261102010000_token_battle_stat_editor.sql",
+    "20261102234000_exploration_token_stats.sql",
     "20261102013000_pull_latest_token_state.sql",
   ]) await load(file);
   await db.exec(`
@@ -164,6 +165,40 @@ try {
   await db.query("update public.assets set carry_state=false where id=$1",[asset]);
   await denied("select public.pull_latest_token_state($1)",[continued.id]);
   await db.query("update public.assets set carry_state=true where id=$1",[asset]);
+  // Exploration hazard: damage should reduce current HP, NEVER maximum HP.
+  // The token is tracked on demand without entering combat or spawning an
+  // initiative entry for unrelated tokens.
+  const trapAsset = randomUUID();
+  await as(dm);
+  await db.query("insert into public.assets(id,room_id,name,owner_user_id,hp,ac) values($1,$2,'Trap Hero',$3,30,15)",[trapAsset,room,pc]);
+  const trapToken = await row("select * from public.spawn_asset_token($1,$2,30::float8,30::float8)",[sceneA,trapAsset]);
+  await db.query("update public.tokens set is_hidden=false where id=$1",[trapToken.id]);
+  assert.equal((await row("select count(*)::int as n from public.combatants where token_id=$1",[trapToken.id])).n,0);
+  await as(pc);
+  const hurt = await row("select hp,max_hp,ac from public.adjust_token_hp($1,-7)",[trapToken.id]);
+  assert.deepEqual(hurt,{hp:23,max_hp:30,ac:15});
+  assert.deepEqual(await row("select hp,ac from public.tokens where id=$1",[trapToken.id]),{hp:30,ac:15});
+  const prone = await row("select conditions from public.toggle_token_condition($1,'Prone')",[trapToken.id]);
+  assert.deepEqual(prone.conditions,["Prone"]);
+  const healed = await row("select hp,max_hp from public.adjust_token_hp($1,5)",[trapToken.id]);
+  assert.deepEqual(healed,{hp:28,max_hp:30});
+  await db.query("select public.set_token_battle_stat($1,'ac',19)",[trapToken.id]);
+  assert.equal((await row("select ac from public.tokens where id=$1",[trapToken.id])).ac,19);
+  const cleared = await row("select conditions from public.toggle_token_condition($1,'Prone')",[trapToken.id]);
+  assert.deepEqual(cleared.conditions,[]);
+  await as(other);
+  await denied("select public.adjust_token_hp($1,-5)",[trapToken.id]);
+  await denied("select public.toggle_token_condition($1,'Stunned')",[trapToken.id]);
+  await denied("select public.set_token_battle_stat($1,'hp',10)",[trapToken.id]);
+  await as(stranger,"anon");
+  await denied("select public.adjust_token_hp($1,-5)",[trapToken.id]);
+  await as(dm);
+  await db.query("select public.set_token_battle_stat($1,'hp',12)",[trapToken.id]);
+  assert.deepEqual(await row("select hp,max_hp from public.combatants where token_id=$1",[trapToken.id]),{hp:12,max_hp:30});
+  await db.query("select public.seed_scene_combatants($1)",[sceneA]);
+  assert.equal((await row("select count(*)::int as n from public.combatants where token_id=$1",[trapToken.id])).n,1);
+  assert.equal((await row("select hp from public.combatants where token_id=$1",[trapToken.id])).hp,12);
+
   console.log("Battle stat ownership, synchronization and scene continuity regression tests passed.");
 } finally {
   await db.close();

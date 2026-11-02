@@ -19,7 +19,6 @@ import { useToast } from "@/components/toast";
 import { TokenBattleStats } from "@/components/scene/TokenBattleStats";
 import { rollLoot, type LootResult } from "@/lib/loot";
 import { stripTags } from "@/lib/reference/render";
-import { CONDITION_PRESETS, conditionColor } from "@/lib/conditions";
 import type { RoomStore } from "@/lib/room/useRoomState";
 import type {
   Combatant,
@@ -2528,8 +2527,8 @@ export function SceneCanvas({
             .filter((t) => isDM || !t.is_hidden)
             .map((t) => {
               const owned = room.role === "player" && t.owner_user_id === room.userId;
-              // Keep combatant state available between encounters and scenes,
-              // but never render its HP/AC HUD after the scene leaves combat.
+              // Render battle stats throughout the adventure, including trap
+              // damage in exploration. Stored combatant state survives modes.
               const combatant = combatantByToken.get(t.id) ?? null;
               return (
                 <TokenSprite
