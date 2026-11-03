@@ -6,9 +6,12 @@ on:
     paths:
       - 'src/components/scene/**'
       - 'src/components/room/**'
+      - 'src/lib/image-upload.ts'
+      - 'tests/image-upload.mjs'
       - 'src/components/dice/**'
       - 'src/lib/dice/**'
       - 'tests/dice-results.mjs'
+      - 'tests/dice-banner.mjs'
       - 'src/components/toast.tsx'
       - 'src/lib/database.types.ts'
       - 'supabase/migrations/**'
@@ -19,6 +22,8 @@ on:
       - 'package*.json'
       - '.github/workflows/test-battle-stats.yml'
   workflow_dispatch:
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -39,7 +44,7 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
       - name: ESLint
-        run: npm run lint -- src/components/scene/SceneCanvas.tsx src/components/scene/TokenBattleStats.tsx
+        run: npm run lint -- src/components/scene/SceneCanvas.tsx src/components/scene/TokenBattleStats.tsx src/components/room/ImageUploadButton.tsx src/lib/image-upload.ts src/lib/dice/rollBanner.ts src/components/toast.tsx src/components/dice/DiceTray.tsx
       - name: Isolated Postgres regression
         run: npm run test:battle-stats
       - name: Token-group RLS and deployment regression
@@ -48,3 +53,7 @@ jobs:
         run: npm run test:combat-visuals
       - name: Dice engine and parser regressions
         run: npm run test:dice-results
+      - name: Natural and dirty dice banner regressions
+        run: node --test tests/dice-banner.mjs
+      - name: Image upload and drag-drop regressions
+        run: npm run test:image-upload

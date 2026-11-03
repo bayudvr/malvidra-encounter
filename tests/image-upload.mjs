@@ -34,6 +34,41 @@ function loadModule(path, imports, globals = {}) {
 
 const validation = loadModule("../src/lib/image-upload.ts", {});
 
+test("file drops accept only one supported image at a time", () => {
+  const good = new File([png], "map.png", { type: "image/png" });
+  assert.equal(validation.droppedImageError([good]), null);
+  assert.match(validation.droppedImageError([]), /one image at a time/i);
+  assert.match(validation.droppedImageError([good, good]), /one image at a time/i);
+  assert.match(validation.droppedImageError([
+    new File([Buffer.from("<svg></svg>")], "token.svg", { type: "image/svg+xml" }),
+  ]), /jpg.*png.*webp.*gif/i);
+  assert.match(validation.droppedImageError([
+    new File([Buffer.alloc(validation.MAX_IMAGE_BYTES + 1)], "big.png", { type: "image/png" }),
+  ]), /4 MB/i);
+});
+
+test("shared image uploader exposes both drag-drop and file picker", () => {
+  const { ImageUploadButton } = loadModule("../src/components/room/ImageUploadButton.tsx", {
+    react: React,
+    "react/jsx-runtime": jsxRuntime,
+    "@/components/ui": {
+      Button: ({ children, disabled, type }) => React.createElement("button", { disabled, type }, children),
+    },
+    "@/components/toast": { useToast: () => ({ error() {} }) },
+    "@/lib/image-upload": validation,
+  });
+  const render = (disabled = false) => renderToStaticMarkup(
+    React.createElement(ImageUploadButton, { roomId, disabled, onUploaded() {} }),
+  );
+  const active = render();
+  assert.match(active, /aria-label="Image upload drop zone"/);
+  assert.match(active, /Drag &amp; drop image here/);
+  assert.match(active, /Choose image/);
+  assert.match(active, /type="file"/);
+  assert.match(active, /image\/png/);
+  assert.match(render(true), /disabled=""/);
+});
+
 const uiImports = {
   react: React,
   "react/jsx-runtime": jsxRuntime,

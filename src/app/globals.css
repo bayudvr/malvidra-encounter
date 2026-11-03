@@ -56,3 +56,35 @@ body {
     animation: initiative-turn-enter 180ms ease-out;
   }
 }
+
+/* All public dice results enter as compact center banners. Only natural
+   d20 rolls receive additional motion; keep map clicks unobstructed. */
+@keyframes mv-roll-banner-enter {
+  from { opacity: 0; transform: translateY(18px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes mv-roll-banner-critical {
+  0% { filter: brightness(1); transform: scale(0.92); }
+  48% { filter: brightness(1.45); transform: scale(1.06); }
+  100% { filter: brightness(1); transform: scale(1); }
+}
+
+@keyframes mv-roll-banner-spark {
+  0% { opacity: 0; transform: scale(0.6) rotate(-12deg); }
+  45% { opacity: 1; transform: scale(1.2) rotate(8deg); }
+  100% { opacity: 0.6; transform: scale(1) rotate(0deg); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .mv-roll-banner {
+    animation: mv-roll-banner-enter 220ms ease-out both;
+  }
+  .mv-roll-banner--critical {
+    animation: mv-roll-banner-enter 220ms ease-out both,
+      mv-roll-banner-critical 680ms ease-out 230ms both;
+  }
+  .mv-roll-banner__spark {
+    animation: mv-roll-banner-spark 800ms ease-out 220ms both;
+  }
+}
