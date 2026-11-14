@@ -24,6 +24,9 @@ try {
     "0009_token_dnd_sizes.sql","0015_token_battle_stats.sql","0017_token_vision.sql",
     "0021_token_counters.sql","0023_seed_combatants_skip_hidden.sql","0026_asset_owner.sql",
     "0031_cross_scene_token_state.sql","0032_harden_state_rpc_permissions.sql",
+    "20261102010000_token_battle_stat_editor.sql",
+    "20261102234000_exploration_token_stats.sql",
+    "20261102013000_pull_latest_token_state.sql",
     "20261102020000_token_groups.sql",
     "20261102023000_force_view_sync.sql",
   ]) await load(f);
@@ -46,7 +49,22 @@ try {
   assert.equal(count[0].deployed,3);
   const rows=await q("select hp,ac,is_hidden,scene_id from public.tokens where scene_id=$1 order by x",[scene]);
   assert.deepEqual(rows.map(r=>[r.hp,r.ac,r.is_hidden,r.scene_id]),Array(3).fill([11,13,true,scene]));
-  const previous=rows.length;
+  // The same preset can be deployed repeatedly without modifying its template.
+  assert.equal((await q("select public.deploy_token_group($1,$2) as deployed",[g.id,scene]))[0].deployed,3);
+  assert.equal((await q("select count(*)::int as n from public.tokens where scene_id=$1",[scene]))[0].n,6);
+  // Then deploy a player party to another scene after editing its battle state.
+  await q("update public.assets set owner_user_id=$1,carry_state=true where id=$2",[player,asset]);
+  const source=(await q("select id from public.tokens where scene_id=$1 limit 1",[scene]))[0];
+  await q("select public.set_token_battle_stat($1,'hp',4)",[source.id]);
+  const nextScene=randomUUID();
+  await q("insert into public.scenes(id,room_id,name) values($1,$2,'Next')",[nextScene,room]);
+  for (let attempt=0;attempt<2;attempt++) {
+    assert.equal((await q("select public.deploy_token_group($1,$2) as deployed",[g.id,nextScene]))[0].deployed,3);
+  }
+  const carried=await q("select c.hp,c.ac,t.is_hidden from public.tokens t join public.combatants c on c.token_id=t.id where t.scene_id=$1",[nextScene]);
+  assert.equal(carried.length,6);
+  assert.ok(carried.every(t=>t.hp===4 && t.ac===13 && t.is_hidden));
+  const previous=6;
   await as(player);
   assert.equal((await q("select * from public.token_groups")).length,0);
   assert.equal((await q("select force_view_sync from public.rooms where id=$1",[room]))[0].force_view_sync,false);

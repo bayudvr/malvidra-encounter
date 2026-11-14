@@ -32,6 +32,16 @@ import type {
 import { TokenSprite } from "@/components/scene/TokenSprite";
 import { shouldRevealTokenStats } from "@/lib/scene/combatVisuals";
 
+type ActiveAoe = {
+  id: string;
+  userId: string;
+  sceneId: string;
+  authorName: string;
+  mode: "cone" | "line" | "cube" | "circle";
+  aoe: { originX: number; originY: number; x: number; y: number };
+  lineWidthFt: number;
+};
+
 const MIN_SCALE = 0.15;
 const MAX_SCALE = 4;
 // How long a speech bubble (chat message spoken "as" a token) stays visible.
@@ -458,29 +468,15 @@ export function SceneCanvas({
     "cone" | "line" | "cube" | "circle" | null
   >(null);
   const [aoeLineWidthFt, setAoeLineWidthFt] = useState(5);
-  const [aoe, setAoe] = useState<{
-    originX: number;
-    originY: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  const aoeRef = useRef<ActiveAoe["aoe"] | null>(null);
   const aoeDrawing = useRef(false);
 
-  // AOE is drawn live for everyone in the room (not just the drawer) — broadcast-only, same
-  // ephemeral pattern as the cast-viewport channel below: nothing is written to the DB, it's
-  // just relayed to whoever's connected right now. Keyed by userId so more than one person
-  // drawing at once doesn't clobber each other's shape.
-  const [remoteAoes, setRemoteAoes] = useState<
-    Map<
-      string,
-      {
-        authorName: string;
-        mode: "cone" | "line" | "cube" | "circle";
-        aoe: { originX: number; originY: number; x: number; y: number };
-        lineWidthFt: number;
-      }
-    >
-  >(new Map());
+  // Each template has its own id, so drawing another never replaces an active area.
+  const [remoteAoes, setRemoteAoes] = useState<Map<string, ActiveAoe>>(new Map());
+  const activeAoesRef = useRef(new Map<string, ActiveAoe>());
+  const aoeIdRef = useRef<string | null>(null);
+  const removedAoesRef = useRef(new Set<string>());
+  const [aoeListOpen, setAoeListOpen] = useState(false);
   const aoeChannelRef = useRef<RealtimeChannel | null>(null);
 
   // Freehand drawing (Owlbear-style pen) — everyone can draw, strokes are saved to
@@ -529,7 +525,10 @@ export function SceneCanvas({
     setDrawingWall(false);
     setWallPoints([]);
     setAoeMode(null);
-    setAoe(null);
+    aoeRef.current = null;
+    aoeIdRef.current = null;
+    aoeDrawing.current = false;
+    setAoeListOpen(false);
     setDrawMode(null);
     setSelectMode(false);
     setStroke(null);
@@ -753,51 +752,46 @@ export function SceneCanvas({
     else toast.info(next ? "Players now follow your camera" : "Players can pan and zoom independently");
   }
 
-  // --- AOE broadcast --------------------------------------------------------
-  // Everyone (not just the DM) opens this — AOE is a player tool too. Ephemeral only, like the
-  // cast channel above: nothing is written to the DB, so a late joiner just doesn't see a
-  // template someone else is mid-drag on until the next update tick.
+  // Retain areas until explicitly removed. Connected peers can restore areas for a
+  // late joiner/reconnecting client; this remains session state, not database storage.
   useEffect(() => {
     if (castMode) return;
+    const areas = activeAoesRef.current;
+    const removed = removedAoesRef.current;
     const channel = room.supabase.channel(`aoe:${scene.room_id}`, {
       config: { broadcast: { self: false } },
     });
     aoeChannelRef.current = channel;
-
     channel.on("broadcast", { event: "update" }, ({ payload }) => {
-      const p = payload as {
-        userId: string;
-        authorName: string;
-        sceneId: string;
-        mode: "cone" | "line" | "cube" | "circle";
-        aoe: { originX: number; originY: number; x: number; y: number };
-        lineWidthFt: number;
-      };
-      if (p.sceneId !== scene.id) return;
-      setRemoteAoes((m) => {
-        const next = new Map(m);
-        next.set(p.userId, {
-          authorName: p.authorName,
-          mode: p.mode,
-          aoe: p.aoe,
-          lineWidthFt: p.lineWidthFt,
-        });
-        return next;
-      });
+      const p = payload as ActiveAoe;
+      if (p.sceneId !== scene.id || !p.id || removed.has(p.id)) return;
+      areas.set(p.id, p);
+      setRemoteAoes(new Map(areas));
     });
     channel.on("broadcast", { event: "clear" }, ({ payload }) => {
-      const { userId } = payload as { userId: string };
-      setRemoteAoes((m) => {
-        if (!m.has(userId)) return m;
-        const next = new Map(m);
-        next.delete(userId);
-        return next;
-      });
+      if (payload.sceneId !== scene.id) return;
+      removed.add(payload.id);
+      areas.delete(payload.id);
+      setRemoteAoes(new Map(areas));
     });
-    channel.subscribe();
-
+    channel.on("broadcast", { event: "sync" }, ({ payload }) => {
+      if (payload.sceneId !== scene.id) return;
+      for (const id of removed) {
+        void channel.send({ type: "broadcast", event: "clear", payload: { id, sceneId: scene.id } });
+      }
+      for (const area of areas.values()) {
+        void channel.send({ type: "broadcast", event: "update", payload: area });
+      }
+    });
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        void channel.send({ type: "broadcast", event: "sync", payload: { sceneId: scene.id } });
+      }
+    });
     return () => {
       aoeChannelRef.current = null;
+      areas.clear();
+      removed.clear();
       setRemoteAoes(new Map());
       room.supabase.removeChannel(channel);
     };
@@ -1123,18 +1117,15 @@ export function SceneCanvas({
     shape: { originX: number; originY: number; x: number; y: number },
     lineWidthFt: number,
   ) {
-    aoeChannelRef.current?.send({
-      type: "broadcast",
-      event: "update",
-      payload: {
-        userId: room.userId,
-        authorName: actorDisplayName,
-        sceneId: scene.id,
-        mode,
-        aoe: shape,
-        lineWidthFt,
-      },
-    });
+    const id = aoeIdRef.current;
+    if (!id) return;
+    const area: ActiveAoe = {
+      id, userId: room.userId, authorName: actorDisplayName,
+      sceneId: scene.id, mode, aoe: shape, lineWidthFt,
+    };
+    activeAoesRef.current.set(id, area);
+    setRemoteAoes(new Map(activeAoesRef.current));
+    void aoeChannelRef.current?.send({ type: "broadcast", event: "update", payload: area });
   }
 
   function sendPing(e: Konva.KonvaEventObject<PointerEvent>) {
@@ -1346,11 +1337,14 @@ export function SceneCanvas({
     return true;
   }
 
-  function broadcastAoeClear() {
-    aoeChannelRef.current?.send({
-      type: "broadcast",
-      event: "clear",
-      payload: { userId: room.userId },
+  function removeAoe(id: string) {
+    const area = activeAoesRef.current.get(id);
+    if (readOnly || !area || (!isDM && area.userId !== room.userId)) return;
+    removedAoesRef.current.add(id);
+    activeAoesRef.current.delete(id);
+    setRemoteAoes(new Map(activeAoesRef.current));
+    void aoeChannelRef.current?.send({
+      type: "broadcast", event: "clear", payload: { id, sceneId: scene.id },
     });
   }
 
@@ -1516,8 +1510,8 @@ export function SceneCanvas({
     setAoeMode(null);
     setAoeMenu(false);
     aoeDrawing.current = false;
-    setAoe(null);
-    broadcastAoeClear();
+    aoeRef.current = null;
+    aoeIdRef.current = null;
   }
 
   // Pinch-to-zoom (two-finger) on touch devices.
@@ -1614,8 +1608,9 @@ export function SceneCanvas({
       if (!raw) return;
       const p = snapToCell(raw);
       aoeDrawing.current = true;
+      aoeIdRef.current = crypto.randomUUID();
       const shape = { originX: p.x, originY: p.y, x: p.x, y: p.y };
-      setAoe(shape);
+      aoeRef.current = shape;
       broadcastAoe(aoeMode, shape, aoeLineWidthFt);
       return;
     }
@@ -1686,12 +1681,11 @@ export function SceneCanvas({
       const raw = worldPointer(e);
       if (raw) {
         const p = snapToCell(raw);
-        setAoe((a) => {
-          if (!a) return a;
-          const next = { ...a, x: p.x, y: p.y };
+        if (aoeRef.current) {
+          const next = { ...aoeRef.current, x: p.x, y: p.y };
+          aoeRef.current = next;
           broadcastAoe(aoeMode, next, aoeLineWidthFt);
-          return next;
-        });
+        }
       }
       return;
     }
@@ -1738,9 +1732,13 @@ export function SceneCanvas({
       return;
     }
     if (aoeMode) {
-      // Stays on screen after the drag ends (not saved to the DB) so it can be read/discussed —
-      // starting a new drag replaces it, and "Done"/switching tool (exitAoe) clears it.
+      const shape = aoeRef.current;
+      if (shape && aoeIdRef.current && Math.hypot(shape.x - shape.originX, shape.y - shape.originY) < 1) {
+        removeAoe(aoeIdRef.current);
+      }
       aoeDrawing.current = false;
+      aoeRef.current = null;
+      aoeIdRef.current = null;
       return;
     }
     // The ruler only lives during the interaction — clear it on release.
@@ -2554,7 +2552,7 @@ export function SceneCanvas({
                     combatant.id === scene.active_combatant_id
                   }
                   combatant={combatant}
-                  revealStats={shouldRevealTokenStats(scene.mode, isDM, !!combatant?.is_player)}
+                  revealStats={shouldRevealTokenStats(scene.mode, isDM, owned)}
                   speechText={speechByToken.get(t.id) ?? null}
                   remotePos={remoteDrags.get(t.id) ?? null}
                   onSelect={(e) => {
@@ -2958,24 +2956,10 @@ export function SceneCanvas({
           </Layer>
         )}
 
-        {aoe && (
-          <Layer listening={false}>
-            <AoeShape
-              mode={aoeMode}
-              aoe={aoe}
-              lineWidthPx={
-                (aoeLineWidthFt / scene.feet_per_square) * scene.grid_size
-              }
-              feetFromPixels={feetFromPixels}
-              viewScale={view.scale}
-            />
-          </Layer>
-        )}
-
         {remoteAoes.size > 0 && (
           <Layer listening={false}>
-            {[...remoteAoes.entries()].map(([userId, r]) => (
-              <Group key={userId}>
+            {[...remoteAoes.entries()].map(([id, r], index) => (
+              <Group key={id}>
                 <AoeShape
                   mode={r.mode}
                   aoe={r.aoe}
@@ -2984,7 +2968,7 @@ export function SceneCanvas({
                   viewScale={view.scale}
                 />
                 <Text
-                  text={r.authorName}
+                  text={`${index + 1}. ${r.authorName}`}
                   x={r.aoe.originX}
                   y={r.aoe.originY - 16 / view.scale}
                   fontSize={11 / view.scale}
@@ -3918,6 +3902,24 @@ export function SceneCanvas({
         );
       })()}
 
+      {remoteAoes.size > 0 && (
+        <div className="absolute left-2 top-2 z-20 max-w-64 rounded-lg border border-purple-700 bg-neutral-950/95 p-2 text-xs text-neutral-200 shadow-xl">
+          <button type="button" aria-expanded={aoeListOpen} onClick={() => setAoeListOpen((open) => !open)} className="min-h-11 px-2 font-semibold">
+            Active AOE ({remoteAoes.size}) {aoeListOpen ? "▴" : "▾"}
+          </button>
+          {aoeListOpen && <ul className="max-h-48 space-y-1 overflow-y-auto">
+            {[...remoteAoes.values()].map((area, index) => (
+              <li key={area.id} className="flex items-center gap-2 border-t border-neutral-800 px-2">
+                <span className="min-w-0 flex-1 truncate">{index + 1}. {area.mode} · {area.authorName}</span>
+                {!readOnly && (isDM || area.userId === room.userId) && (
+                  <button type="button" aria-label={`Delete AOE ${index + 1}: ${area.mode} by ${area.authorName}`} onClick={() => removeAoe(area.id)} className="min-h-11 px-2 text-red-300">Delete</button>
+                )}
+              </li>
+            ))}
+          </ul>}
+        </div>
+      )}
+
       {isDM && selectedToken && (
         <TokenInspector
           key={selectedToken.id}
@@ -4322,9 +4324,7 @@ function MultiTokenBar({
   );
 }
 
-// Renders the AOE template — live while dragging, then stays put after mouse-up until the
-// next drag replaces it or exitAoe() clears it (via "Done" or switching tool). Nothing is
-// ever saved to the DB — purely a local visual aid.
+// Renders a live or retained AOE template.
 function AoeShape({
   mode,
   aoe,
