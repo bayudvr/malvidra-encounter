@@ -122,6 +122,9 @@ export function InitiativeTracker({
             combatant={c}
             active={c.id === activeId}
             isDM={isDM}
+            ownsCombatant={room.role === "player" && (c.token_id
+              ? room.tokens.some((token) => token.id === c.token_id && token.owner_user_id === room.userId)
+              : c.user_id === room.userId)}
             onPatch={(p) => patch(c.id, p)}
             onRemove={() => remove(c.id)}
             onActivate={() => void giveTurn(c.id)}
@@ -188,6 +191,7 @@ function CombatantRow({
   combatant: c,
   active,
   isDM,
+  ownsCombatant,
   onPatch,
   onRemove,
   onActivate,
@@ -195,13 +199,13 @@ function CombatantRow({
   combatant: Combatant;
   active: boolean;
   isDM: boolean;
+  ownsCombatant: boolean;
   onPatch: (p: CombatantUpdate) => void;
   onRemove: () => void;
   onActivate: () => void;
 }) {
-  // Players only see the numbers of player characters — a monster's HP/AC
-  // stays hidden from them.
-  const showStats = isDM || c.is_player;
+  // Character classification is not permission to reveal another token's stats.
+  const showStats = isDM || ownsCombatant;
 
   return (
     <li

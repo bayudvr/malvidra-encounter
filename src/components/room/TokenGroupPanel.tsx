@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Panel } from "@/components/ui";
 import { useToast } from "@/components/toast";
 import type { RoomStore } from "@/lib/room/useRoomState";
@@ -18,6 +18,8 @@ export function TokenGroupPanel({ room }: { room: RoomStore }) {
   const [assetId, setAssetId] = useState("");
   const [quantity, setQuantity] = useState(1);
   const [busy, setBusy] = useState(false);
+  const deploying = useRef(false);
+  const [deploymentMessage, setDeploymentMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const roomId = room.room?.id ?? "";
 
@@ -103,17 +105,39 @@ export function TokenGroupPanel({ room }: { room: RoomStore }) {
   }
 
   async function deploy() {
-    if (!selected || !room.activeScene || busy) return;
-    if (!window.confirm(`Place ${total} hidden tokens from "${selected.name}" in ${room.activeScene.name}?`)) return;
+    const scene = room.activeScene;
+    if (!selected || !scene || busy || deploying.current) return;
+    // Deployment only creates hidden tokens, so the button itself is confirmation.
+    // A browser-suppressed native confirm can silently cancel this operation.
+    deploying.current = true;
     setBusy(true);
-    const { data, error: failure } = await room.supabase.rpc("deploy_token_group", {
-      p_group: selected.id,
-      p_scene: room.activeScene.id,
-    });
-    setBusy(false);
-    if (failure) return toast.error(failure.message);
-    toast.success(`Placed ${data} hidden tokens in ${room.activeScene.name}`);
-    room.reloadScene();
+    setError(null);
+    setDeploymentMessage(null);
+    try {
+      const { data, error: failure } = await room.supabase.rpc("deploy_token_group", {
+        p_group: selected.id,
+        p_scene: scene.id,
+      }).abortSignal(AbortSignal.timeout(30_000));
+      if (failure) {
+        const message = /abort|timeout/i.test(failure.message)
+          ? "Deployment timed out. Refresh the scene to check for hidden tokens before trying again."
+          : `Could not deploy preset: ${failure.message}`;
+        setError(message);
+        toast.error(message);
+        return;
+      }
+      const message = `Placed ${data} hidden tokens in ${scene.name}. Reveal them on the map to show players.`;
+      setDeploymentMessage(message);
+      toast.success(message);
+      void room.reloadScene().catch(() => toast.error("Tokens were placed, but the scene could not refresh. Refresh the page to see them."));
+    } catch {
+      const message = "Deployment could not be confirmed. Refresh the scene to check for hidden tokens before trying again.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      deploying.current = false;
+      setBusy(false);
+    }
   }
 
   return (
@@ -121,6 +145,8 @@ export function TokenGroupPanel({ room }: { room: RoomStore }) {
       <p className="mb-2 text-xs text-neutral-400">
         Save reusable token rosters with quantities. Deploy all tokens hidden, then position and reveal them on the map.
       </p>
+      {deploymentMessage && <p role="status" className="mb-2 text-xs text-emerald-300">{deploymentMessage}</p>}
+      {busy && <p role="status" className="mb-2 text-xs text-amber-300">Working…</p>}
       {error && <p role="alert" className="mb-2 text-xs text-red-300">{error}</p>}
       <form className="mb-3 flex gap-1" onSubmit={(e) => void createGroup(e)}>
         <Input value={newName} maxLength={80} onChange={(e) => setNewName(e.target.value)} placeholder="Party / Goblin Ambush" aria-label="New group name" />
