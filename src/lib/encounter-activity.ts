@@ -17,7 +17,7 @@ export function browserSupabaseUrl() {
 }
 export function externalReferenceBase() {
   if (encounterBase && typeof window !== "undefined" && window.location.hostname === "1575922929303294143.discordsays.com") {
-    return window.location.origin + "/encounter-reference/5etools-mirror-3/5etools-src/main/data/";
+    return window.location.origin + "/encounter-media-raw-githubusercontent-com/5etools-mirror-3/5etools-src/main/data/";
   }
   return "https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data/";
 }
