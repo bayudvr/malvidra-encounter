@@ -1,5 +1,6 @@
 "use client";
 
+import { activityImageUrl } from "@/lib/encounter-activity";
 import { useEffect, useState } from "react";
 
 type Status = "loading" | "loaded" | "failed";
@@ -31,9 +32,9 @@ export function useImage(url: string | null | undefined) {
       const fallback = new window.Image();
       fallback.onload = () => !cancelled && (setImage(fallback), setStatus("loaded"));
       fallback.onerror = () => !cancelled && setStatus("failed");
-      fallback.src = url;
+      fallback.src = activityImageUrl(url);
     };
-    img.src = url;
+    img.src = activityImageUrl(url);
 
     return () => {
       cancelled = true;
