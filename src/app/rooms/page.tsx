@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
@@ -101,7 +102,7 @@ export default async function RoomsPage() {
             </p>
           </div>
         </div>
-        <SignOutButton />
+        <div className="flex flex-wrap items-center justify-end gap-3"><Link href="/account" className="text-sm text-amber-400 hover:underline">Account connections</Link><SignOutButton /></div>
       </header>
 
       <RoomsActions />
