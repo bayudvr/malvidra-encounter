@@ -1,5 +1,6 @@
 "use client";
 
+import { activityImageUrl } from "@/lib/encounter-activity";
 import { useState } from "react";
 
 import { Button, Input, Label, Modal, Panel } from "@/components/ui";
@@ -381,7 +382,7 @@ function AssetRow({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             {...dragProps}
-            src={asset.image_url}
+            src={activityImageUrl(asset.image_url)}
             alt=""
             className={`h-7 w-7 shrink-0 rounded-full object-cover ${
               canDrop ? "cursor-grab active:cursor-grabbing" : ""
