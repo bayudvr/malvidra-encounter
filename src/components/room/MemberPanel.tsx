@@ -1,5 +1,6 @@
 "use client";
 
+import { encounterBase, encounterWebsite } from "@/lib/encounter-activity";
 import { useRef, useState } from "react";
 
 import { Badge, Button, Panel } from "@/components/ui";
@@ -22,7 +23,7 @@ export function MemberPanel({
 
   const inviteLink =
     typeof window !== "undefined" && code
-      ? `${window.location.origin}/join/${code}`
+      ? `${encounterBase ? encounterWebsite : window.location.origin}/join/${code}`
       : "";
 
   async function copy() {
