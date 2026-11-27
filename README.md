@@ -144,3 +144,7 @@ Add two repo secrets (**Settings → Secrets and variables → Actions**):
 
 - `SUPABASE_URL` — same as `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_KEY` — the `service_role` key (bypasses RLS; never expose it client-side)
+
+## Discord identity linking (website)
+
+Existing non-guest users sign in using their existing Encounter credentials, open Rooms > Account connections, then select Link Discord account. This uses Supabase Auth manual identity linking with PKCE and does not create a second DM account, modify room ownership, or bypass RLS. Enable Manual Linking and the Discord OAuth provider in the existing Supabase project. Register the provider callback URL shown in Supabase in the same Discord application, and allow `https://malvidra-encounter.vercel.app/auth/discord-link` in Supabase Auth Redirect URLs. Keep the existing Discord Activity redirect URI. The provider client secret belongs only in Supabase settings. If Discord is already linked elsewhere, do not automatically merge accounts. Test by recording an existing user UUID and room IDs before linking and verifying they are unchanged afterward. This is not yet embedded Discord single sign-on; the Activity SDK access token is not a Supabase ID token. A separate secure handoff or supported OAuth flow and Discord proxy testing are required before enabling embedded access. No schema changes.
