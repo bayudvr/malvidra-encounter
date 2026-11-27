@@ -11,13 +11,34 @@ export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const toast = useToast();
-  const next = params.get("next") || "/rooms";
+  const requestedNext = params.get("next");
+  const next = requestedNext && /^\/rooms(?:\/|\?|$)/.test(requestedNext) && !requestedNext.includes("\\") ? requestedNext : "/rooms";
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function signInDiscord() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const supabase = createClient();
+      const callback = new URL("/auth/discord-login", window.location.origin);
+      callback.searchParams.set("next", next);
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "discord",
+        options: { redirectTo: callback.toString(), skipBrowserRedirect: true },
+      });
+      if (error) throw error;
+      if (!data.url) throw new Error("Discord authorization URL unavailable");
+      window.location.assign(data.url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Discord sign-in failed");
+      setBusy(false);
+    }
+  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -101,6 +122,13 @@ export function LoginForm() {
             : "Sign in"}
       </Button>
 
+      {mode === "signin" && <>
+        <div className="border-t border-neutral-800 pt-4">
+          <Button type="button" className="w-full" disabled={busy} onClick={signInDiscord}>Sign in with Discord</Button>
+          <p className="mt-2 text-xs text-neutral-400">Already have rooms? Link Discord from your existing account before using Discord sign-in. Unlinked Discord accounts may create a new account.</p>
+          {params.get("error") === "discord" && <p className="mt-2 text-sm text-red-400" role="alert">Discord sign-in could not be completed. Try again or use your existing email and password.</p>}
+        </div>
+      </>}
       <p className="text-center text-xs text-neutral-500">
         {mode === "signup" ? "Already have an account?" : "New here?"}{" "}
         <button
