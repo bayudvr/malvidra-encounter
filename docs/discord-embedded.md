@@ -4,31 +4,13 @@ The existing production website remains the canonical app. The Activity build is
 
 ## Build and route
 
-Build a separate project from main only with NEXT_PUBLIC_ENCOUNTER_BASE_PATH=/encounter. Keep the normal website build unset. The Discord URL mapping must preserve /encounter in the destination (verify with a test GET before enabling). Add /encounter-supabase -> ldrpyeghbsbgbmqyvsbr.supabase.co for browser Auth, REST and Realtime connections, including WebSocket upgrades. The server continues to use the canonical Supabase URL.
+Build a separate project from main only with NEXT_PUBLIC_ENCOUNTER_BASE_PATH=/encounter. Keep the normal website build unset. The Discord URL mapping must preserve /encounter in the destination (verify with a test GET before enabling). Do not expose arbitrary upstream HTML under the Activity origin. Add /encounter-supabase -> ldrpyeghbsbgbmqyvsbr.supabase.co for browser Auth, REST and Realtime connections, including WebSocket upgrades. The server continues to use the canonical Supabase URL.
 
 Cookies use a separate storage key, /encounter path, Secure, SameSite=None, Partitioned. A scoped path is NOT a security boundary against scripts on the same Activity origin. Audit all game adapters and third-party scripts before exposing a privileged DM session; if isolation cannot be assured, use a dedicated Encounter Activity origin instead. Do not enable the embedded launcher publicly until this is verified.
 
-## Asset mappings
+## Asset security
 
-The following known image hosts were observed in aggregate in existing rooms, assets and tokens. Configure explicit mappings; do not add a general arbitrary-host proxy. The prefix is /encounter-media- plus the hostname with dots replaced by hyphens. Start with i.imgur.com, 5e.tools and raw.githubusercontent.com; the remaining listed hosts can be added for coverage.
-
-| Prefix | Target |
-| --- | --- |
-| /encounter-media-i-imgur-com | i.imgur.com |
-| /encounter-media-5e-tools | 5e.tools |
-| /encounter-media-raw-githubusercontent-com | raw.githubusercontent.com |
-| /encounter-media-i-pinimg-com | i.pinimg.com |
-| /encounter-media-encrypted-tbn0-gstatic-com | encrypted-tbn0.gstatic.com |
-| /encounter-media-www-dndbeyond-com | www.dndbeyond.com |
-| /encounter-media-dndplaybook-lon1-cdn-digitaloceanspaces-com | dndplaybook.lon1.cdn.digitaloceanspaces.com |
-| /encounter-media-cdn-phototourl-com | cdn.phototourl.com |
-| /encounter-media-media-discordapp-net | media.discordapp.net |
-| /encounter-media-upload-wikimedia-org | upload.wikimedia.org |
-| /encounter-media-images-ext-1-discordapp-net | images-ext-1.discordapp.net |
-| /encounter-media-i-redd-it | i.redd.it |
-| /encounter-media-github-com | github.com |
-
-Original stored URLs are never modified. Redirects or other hosts may still require a mapping; do not open unknown hosts automatically.
+Do not map third-party websites directly into the Activity origin. Existing assets are loaded through /encounter/api/activity-image, with exact HTTPS hostname allowlist, no redirect following, authenticated access, raster MIME allowlist, 10 MiB bound and sandbox/nosniff headers. Reference JSON uses /encounter/api/activity-reference with a fixed upstream directory, safe path segments, 12 MiB bound and JSON reserialization. No cookies, authorization headers or client-provided upstream headers are forwarded. Original stored URLs are not changed. Unsupported formats, redirects and non-allowlisted hosts can fail; test existing maps before enabling.
 
 ## Acceptance criteria before enabling
 
