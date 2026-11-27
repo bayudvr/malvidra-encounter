@@ -1,3 +1,4 @@
+import { activityImageUrl } from "@/lib/encounter-activity";
 import type { ReactNode } from "react";
 
 // 5etools' `entries` fields use a small recursive markup language: plain strings hold inline
@@ -67,7 +68,7 @@ function ImageNode({ node, keyPrefix }: { node: { [key: string]: unknown }; keyP
   return (
     <figure key={keyPrefix} className="mb-2 last:mb-0">
       {/* eslint-disable-next-line @next/next/no-img-element -- external, unknown-dimension 5etools/GitHub-hosted images; next/image's domain allowlist + fixed sizing isn't a fit here. */}
-      <img src={src} alt={title ?? ""} className="max-w-full rounded border border-neutral-800" />
+      <img src={activityImageUrl(src)} alt={title ?? ""} className="max-w-full rounded border border-neutral-800" />
       {title && <figcaption className="mt-1 text-[10px] text-neutral-500">{title}</figcaption>}
     </figure>
   );
