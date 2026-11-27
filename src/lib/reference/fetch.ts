@@ -1,3 +1,4 @@
+import { encounterPath, externalReferenceBase } from "@/lib/encounter-activity";
 import type {
   AdventureIndexEntry,
   AdventureSection,
@@ -14,14 +15,14 @@ import type {
 // live 5e.tools site itself can't be used this way: it's behind a Cloudflare challenge
 // (cf-mitigated: challenge) that blocks plain fetch()/XHR, iframing it is blocked outright by
 // x-frame-options: SAMEORIGIN.
-const RAW_BASE = "https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data/";
+const RAW_BASE = externalReferenceBase();
 
 let indexPromise: Promise<ReferenceIndexEntry[]> | null = null;
 
 /** Fetched once per page load and cached — it's the small (~550KB) name/type/source index. */
 export function loadReferenceIndex(): Promise<ReferenceIndexEntry[]> {
   if (!indexPromise) {
-    indexPromise = fetch("/reference-index.json").then((r) => {
+    indexPromise = fetch(encounterPath("/reference-index.json")).then((r) => {
       if (!r.ok) throw new Error(`Failed to load reference index: ${r.status}`);
       return r.json();
     });
@@ -79,7 +80,7 @@ let adventureIndexPromise: Promise<AdventureIndexEntry[]> | null = null;
 /** Fetched once per page load and cached — small (~400KB) id/name/source/chapter-list metadata. */
 export function loadAdventureIndex(): Promise<AdventureIndexEntry[]> {
   if (!adventureIndexPromise) {
-    adventureIndexPromise = fetch("/adventure-index.json").then((r) => {
+    adventureIndexPromise = fetch(encounterPath("/adventure-index.json")).then((r) => {
       if (!r.ok) throw new Error(`Failed to load adventure index: ${r.status}`);
       return r.json();
     });

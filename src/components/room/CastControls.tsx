@@ -1,5 +1,6 @@
 "use client";
 
+import { encounterBase, encounterWebsite } from "@/lib/encounter-activity";
 import { useEffect, useRef, useState } from "react";
 
 import { useToast } from "@/components/toast";
@@ -50,7 +51,7 @@ export function CastControls({
     }
     try {
       const req = new window.PresentationRequest!(
-        `${window.location.origin}/cast/${castToken}`,
+        `${encounterBase ? encounterWebsite : window.location.origin}/cast/${castToken}`,
       );
       const conn = await req.start(); // shows the device picker
       connRef.current = conn;

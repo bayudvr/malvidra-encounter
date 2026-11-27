@@ -1,5 +1,6 @@
 "use client";
 
+import { encounterBase } from "@/lib/encounter-activity";
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -122,13 +123,14 @@ export function LoginForm() {
             : "Sign in"}
       </Button>
 
-      {mode === "signin" && <>
+      {mode === "signin" && !encounterBase && <>
         <div className="border-t border-neutral-800 pt-4">
           <Button type="button" className="w-full" disabled={busy} onClick={signInDiscord}>Sign in with Discord</Button>
           <p className="mt-2 text-xs text-neutral-400">Already have rooms? Link Discord from your existing account before using Discord sign-in. Unlinked Discord accounts may create a new account.</p>
           {params.get("error") === "discord" && <p className="mt-2 text-sm text-red-400" role="alert">Discord sign-in could not be completed. Try again or use your existing email and password.</p>}
         </div>
       </>}
+      {encounterBase && <p className="text-xs text-neutral-400">Activity beta: use your existing Encounter account. Discord-only sign-in is available on the regular website; automatic handoff is not enabled yet.</p>}
       <p className="text-center text-xs text-neutral-500">
         {mode === "signup" ? "Already have an account?" : "New here?"}{" "}
         <button

@@ -15,8 +15,16 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npx tsc --noEmit
+      - run: node --test tests/activity-media.mjs
       - run: npm run build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-not-a-secret
           NEXT_PUBLIC_SITE_URL: http://localhost:3000
+      - name: Build opt-in Discord VTT
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-not-a-secret
+          NEXT_PUBLIC_SITE_URL: http://localhost:3000
+          NEXT_PUBLIC_ENCOUNTER_BASE_PATH: /encounter

@@ -1,5 +1,6 @@
 "use client";
 
+import { encounterPath } from "@/lib/encounter-activity";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 
 import { Button } from "@/components/ui";
@@ -46,7 +47,7 @@ export function ImageUploadButton({
     try {
       const form = new FormData();
       form.set("image", file);
-      const response = await fetch(`/api/rooms/${roomId}/images`, {
+      const response = await fetch(encounterPath(`/api/rooms/${roomId}/images`), {
         method: "POST",
         body: form,
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(45_000)]),

@@ -33,6 +33,12 @@ function loadModule(path, imports, globals = {}) {
 }
 
 const validation = loadModule("../src/lib/image-upload.ts", {});
+const webPaths = loadModule("../src/lib/encounter-activity.ts", {}, { process: { env: {} } });
+const activityPaths = loadModule("../src/lib/encounter-activity.ts", {}, { process: { env: { NEXT_PUBLIC_ENCOUNTER_BASE_PATH: "/encounter" } } });
+test("upload paths preserve ordinary routes and prefix Activity routes", () => {
+  assert.equal(webPaths.encounterPath(`/api/rooms/${roomId}/images`), `/api/rooms/${roomId}/images`);
+  assert.equal(activityPaths.encounterPath(`/api/rooms/${roomId}/images`), `/encounter/api/rooms/${roomId}/images`);
+});
 
 test("file drops accept only one supported image at a time", () => {
   const good = new File([png], "map.png", { type: "image/png" });
@@ -56,6 +62,7 @@ test("shared image uploader exposes both drag-drop and file picker", () => {
     },
     "@/components/toast": { useToast: () => ({ error() {} }) },
     "@/lib/image-upload": validation,
+    "@/lib/encounter-activity": webPaths,
   });
   const render = (disabled = false) => renderToStaticMarkup(
     React.createElement(ImageUploadButton, { roomId, disabled, onUploaded() {} }),
@@ -89,6 +96,7 @@ const uiImports = {
     TokenFolderManager: () => null,
   },
   "@/lib/utils": {},
+  "@/lib/encounter-activity": webPaths,
 };
 
 test("scene form waits for the room to load before rendering its upload control", () => {

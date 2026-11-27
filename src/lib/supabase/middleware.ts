@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
+import { activityCookieOptions } from "@/lib/encounter-activity";
 import type { Database } from "@/lib/database.types";
 
 const PUBLIC_PATHS = ["/login", "/auth", "/join", "/cast"];
@@ -12,6 +13,7 @@ export async function updateSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: activityCookieOptions,
       cookies: {
         getAll() {
           return request.cookies.getAll();
