@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  basePath: process.env.NEXT_PUBLIC_ENCOUNTER_BASE_PATH === "/encounter" ? "/encounter" : "",
   // @3d-dice/dice-box ships modern ESM with relative dynamic imports for its
   // Babylon world + web workers; let Next process it.
   transpilePackages: ["@3d-dice/dice-box"],
