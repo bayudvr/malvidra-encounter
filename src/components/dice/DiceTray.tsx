@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { encounterPath } from "@/lib/encounter-activity";
 import type DiceBox from "@3d-dice/dice-box";
 import DiceParser from "@3d-dice/dice-parser-interface";
 import { normalizeDiceBoxResults, rollWithout3D } from "@/lib/dice/rollResults";
@@ -194,7 +195,7 @@ export function DiceTray({ room, request = null, onRequestClose, onRequestComple
       const box = new DiceBox({
         container: "#mv-dice-overlay",
         id: "mv-dice-canvas",
-        assetPath: "/assets/dice-box/",
+        assetPath: encounterPath("/assets/dice-box/"),
         scale: 4,
         gravity: 2,
         // Picks up whatever was saved from a previous session (loadSavedTheme,
