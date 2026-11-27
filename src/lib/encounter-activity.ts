@@ -5,6 +5,7 @@ export const encounterWebsite = "https://malvidra-encounter.vercel.app";
 export const activityCookieOptions = encounterBase ? {
   name: "sb-malvidra-encounter-activity",
   path: "/encounter",
+  domain: "1575922929303294143.discordsays.com",
   sameSite: "none" as const,
   secure: true,
   partitioned: true,
