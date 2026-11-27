@@ -1,5 +1,6 @@
 "use client";
 
+import { activityImageUrl } from "@/lib/encounter-activity";
 import { useMemo, useState } from "react";
 
 import { useToast } from "@/components/toast";
@@ -138,7 +139,7 @@ function Portrait({ combatant, token, active = false }: { combatant: Combatant; 
       style={{ background: token?.image_url ? undefined : colorFromString(combatant.name) }}>
       {token?.image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={token.image_url} alt="" className="h-full w-full object-cover" />
+        <img src={activityImageUrl(token.image_url)} alt="" className="h-full w-full object-cover" />
       ) : <span className={`flex h-full w-full items-center justify-center font-bold text-neutral-950 ${active ? "text-sm" : "text-[10px]"}`}>{initials(combatant.name)}</span>}
     </div>
   );
