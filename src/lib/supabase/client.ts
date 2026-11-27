@@ -1,11 +1,13 @@
 import { createBrowserClient } from "@supabase/ssr";
 
+import { activityCookieOptions, browserSupabaseUrl } from "@/lib/encounter-activity";
 import type { Database } from "@/lib/database.types";
 
 export function createClient() {
   return createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    browserSupabaseUrl(),
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookieOptions: activityCookieOptions },
   );
 }
 
@@ -17,12 +19,13 @@ export function createClient() {
  */
 export function createCastClient(castToken: string) {
   return createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    browserSupabaseUrl(),
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       // Never share (or become) the app's cached singleton client — this one
       // carries an auth header the authed client must not inherit.
       isSingleton: false,
+      cookieOptions: activityCookieOptions,
       global: { headers: { "x-cast-token": castToken } },
       auth: { persistSession: false, autoRefreshToken: false },
     },
