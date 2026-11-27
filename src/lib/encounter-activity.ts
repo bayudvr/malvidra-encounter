@@ -17,18 +17,18 @@ export function browserSupabaseUrl() {
 }
 export function externalReferenceBase() {
   if (encounterBase && typeof window !== "undefined" && window.location.hostname === "1575922929303294143.discordsays.com") {
-    return window.location.origin + "/encounter-media-raw-githubusercontent-com/5etools-mirror-3/5etools-src/main/data/";
+    return window.location.origin + "/encounter/api/activity-reference/";
   }
   return "https://raw.githubusercontent.com/5etools-mirror-3/5etools-src/main/data/";
 }
 
-const imageHosts = new Set(["i.imgur.com","5e.tools","raw.githubusercontent.com","i.pinimg.com","encrypted-tbn0.gstatic.com","www.dndbeyond.com","dndplaybook.lon1.cdn.digitaloceanspaces.com","cdn.phototourl.com","media.discordapp.net","upload.wikimedia.org","images-ext-1.discordapp.net","i.redd.it","github.com"]);
+export const imageHosts = new Set(["i.imgur.com","5e.tools","raw.githubusercontent.com","i.pinimg.com","encrypted-tbn0.gstatic.com","www.dndbeyond.com","dndplaybook.lon1.cdn.digitaloceanspaces.com","cdn.phototourl.com","media.discordapp.net","upload.wikimedia.org","images-ext-1.discordapp.net","i.redd.it","github.com"]);
 export function activityImageUrl(value: string): string {
   if (!encounterBase || typeof window === "undefined" || window.location.hostname !== "1575922929303294143.discordsays.com") return value;
   try {
     const url = new URL(value);
     if (url.protocol === "https:" && !url.port && !url.username && !url.password && imageHosts.has(url.hostname)) {
-      return "/encounter-media-" + url.hostname.replaceAll(".", "-") + url.pathname + url.search;
+      return "/encounter/api/activity-image?url=" + encodeURIComponent(url.href);
     }
   } catch { /* use the original URL for local assets */ }
   return value;
